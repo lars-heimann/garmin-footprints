@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-06-22T14:28:40.240366Z",
+  "sourceArchive": "data/a22756ef-76bc-4c8e-9407-5dea56a67a6b_1.zip",
+  "totalRunSummaries": 639,
+  "parsedRunActivities": 420,
+  "uploadedFitFiles": 24958,
+  "candidateGpsFiles": 1053,
+  "skippedNonRunGps": 111,
+  "skippedNoGps": 23905,
+  "skippedNoTimestamp": 0,
+  "skippedDuplicateMatches": 17,
+  "skippedBeforeStartDate": 505,
+  "pointCount": 288491,
+  "maxPoints": 900000,
+  "sampled": false,
+  "requestedStartDate": "2022-05-01",
+  "start": "2022-05-01T06:46:39Z",
+  "end": "2026-05-19T19:08:36Z",
+  "bounds": {
+    "minMercatorX": -1.4526998159211904,
+    "maxMercatorX": 2.6779005362090307,
+    "minMercatorY": -0.5094650487131307,
+    "maxMercatorY": 1.127779525791481
+  },
+  "initialView": {
+    "mode": "densest_cluster",
+    "cellSize": 0.004,
+    "radiusCells": 2,
+    "pointCount": 134074,
+    "minMercatorX": 0.13139059605428657,
+    "maxMercatorX": 0.1337879179466517,
+    "minMercatorY": 1.0640350955100504,
+    "maxMercatorY": 1.0661282640902723
+  },
+  "privacy": {
+    "method": "deterministic randomized per-activity start/end point trim",
+    "trimFractionRange": [
+      0.035,
+      0.075
+    ]
+  }
+}

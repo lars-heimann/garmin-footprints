@@ -1,0 +1,16 @@
+# Raw personal exports and unpacked Garmin data
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local/server noise
+.DS_Store
+*.log
+
+# Editor/project files
+.idea/
+.vscode/
