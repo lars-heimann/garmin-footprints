@@ -14,6 +14,10 @@ resource "cloudflare_r2_bucket" "app" {
 resource "cloudflare_d1_database" "app" {
   account_id = var.cloudflare_account_id
   name       = var.d1_database_name
+
+  lifecycle {
+    ignore_changes = [read_replication]
+  }
 }
 
 resource "cloudflare_worker" "app" {
