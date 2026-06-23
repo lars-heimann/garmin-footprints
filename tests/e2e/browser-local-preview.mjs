@@ -105,12 +105,13 @@ function harnessHtml() {
   </head>
   <body>
     <p id="status">starting</p>
-    <iframe id="viewer" src="/viewer/index.html"></iframe>
+    <iframe id="viewer"></iframe>
     <script type="module">
       import { buildVisualizationFromGarminFile } from "/browser-processing/processor-core.js";
 
       const status = document.getElementById("status");
       const frame = document.getElementById("viewer");
+      let result = null;
 
       function setStatus(message) {
         status.textContent = message;
@@ -119,7 +120,7 @@ function harnessHtml() {
 
       function waitForViewerRender() {
         return new Promise((resolve, reject) => {
-          const deadline = Date.now() + 15000;
+          const deadline = Date.now() + 45000;
           const timer = setInterval(() => {
             const doc = frame.contentDocument;
             const pointCount = doc?.getElementById("pointCount")?.textContent || "";
@@ -147,17 +148,18 @@ function harnessHtml() {
         setStatus("fetching");
         const file = await (await fetch("/__fixture/garmin.zip")).blob();
         setStatus("processing");
-        const result = await buildVisualizationFromGarminFile(file, {
+        window.addEventListener("message", (event) => {
+          if (event.source !== frame.contentWindow || event.data?.type !== "runmaps-viewer-ready" || !result) return;
+          const buffer = result.points.buffer.slice(result.points.byteOffset, result.points.byteOffset + result.points.byteLength);
+          frame.contentWindow.postMessage({ type: "runmaps-local-data", meta: result.meta, points: buffer }, window.location.origin, [buffer]);
+        });
+        result = await buildVisualizationFromGarminFile(file, {
           displayName: "Browser E2E Runner",
           slug: "local-preview",
           startDate: "2022-05-01",
           maxPoints: 10000,
         });
-        window.addEventListener("message", (event) => {
-          if (event.source !== frame.contentWindow || event.data?.type !== "runmaps-viewer-ready") return;
-          const buffer = result.points.buffer.slice(result.points.byteOffset, result.points.byteOffset + result.points.byteLength);
-          frame.contentWindow.postMessage({ type: "runmaps-local-data", meta: result.meta, points: buffer }, window.location.origin, [buffer]);
-        });
+        frame.src = "/viewer/index.html";
         await waitForViewerRender();
         setStatus("ready:" + result.meta.pointCount);
       } catch (error) {

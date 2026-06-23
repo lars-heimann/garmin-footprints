@@ -240,6 +240,24 @@ class BuildVisualizationDataTest(unittest.TestCase):
             self.assertEqual(result.returncode, ExitCode.PARSER_FAILURE)
             self.assertIn("PARSER_FAILURE", result.stderr)
 
+    def test_accepts_full_fit_uint8_field_count_range(self):
+        field_count = 129
+        data = bytearray()
+        data.extend(b"\x40")
+        data.extend(b"\x00")
+        data.extend(b"\x00")
+        data.extend(struct.pack("<H", 20))
+        data.extend(bytes([field_count]))
+        data.extend(b"\0" * field_count * 3)
+        header = bytearray(14)
+        header[0] = 14
+        header[1] = 16
+        struct.pack_into("<H", header, 2, 100)
+        struct.pack_into("<I", header, 4, len(data))
+        header[8:12] = b".FIT"
+
+        self.assertEqual(build_visualization_data.parse_fit_records(bytes(header + data + b"\0\0")), [])
+
 
 if __name__ == "__main__":
     unittest.main()
