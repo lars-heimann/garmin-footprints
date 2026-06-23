@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Running Footprints</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="Interactive density map of running GPS points"></canvas>
+
+    <main class="hud" aria-live="polite">
+      <section class="summary">
+        <p class="label">Running footprints</p>
+        <h1 id="mapTitle">Every run, one GPS point at a time</h1>
+        <dl>
+          <div>
+            <dt>Points</dt>
+            <dd id="pointCount">...</dd>
+          </div>
+          <div>
+            <dt>Runs</dt>
+            <dd id="runCount">...</dd>
+          </div>
+          <div>
+            <dt>Range</dt>
+            <dd id="dateRange">...</dd>
+          </div>
+        </dl>
+        <details class="about-map">
+          <summary>About this map</summary>
+          <div class="about-map-content">
+            <p id="aboutMap">
+              This map visualizes running routes from a Garmin account export. Brighter streets were run more often.
+            </p>
+            <p>
+              Starts and finishes are trimmed before publishing, so the map focuses on routes instead of precise
+              doorsteps.
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <section class="status">
+        <p id="currentDate">Loading data...</p>
+        <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
+      </section>
+    </main>
+
+    <nav class="controls" aria-label="Visualization controls">
+      <button id="playPause" type="button">Pause</button>
+      <button id="replay" type="button">Replay</button>
+      <button id="resetView" type="button">Reset view</button>
+      <label>
+        Time
+        <input id="timeSlider" type="range" min="0" max="1000" value="0" />
+      </label>
+    </nav>
+
+    <p id="error" class="error" hidden></p>
+    <script src="./app.js"></script>
+  </body>
+</html>

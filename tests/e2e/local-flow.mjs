@@ -49,6 +49,10 @@ async function startServer(env) {
   const server = createServer(async (incoming, outgoing) => {
     try {
       const effectiveHost = String(incoming.headers["x-test-host"] || incoming.headers.host || "127.0.0.1");
+      if (incoming.method === "PUT" && incoming.url?.startsWith("/__r2/")) {
+        await handleFakeR2PartUpload(incoming, outgoing, env);
+        return;
+      }
       const url = `http://${effectiveHost}${incoming.url}`;
       const headers = new Headers();
       for (const [key, value] of Object.entries(incoming.headers)) {
@@ -99,6 +103,23 @@ async function startServer(env) {
       await new Promise((resolveClose) => server.close(resolveClose));
     },
   };
+}
+
+async function handleFakeR2PartUpload(incoming, outgoing, env) {
+  const url = new URL(`http://127.0.0.1${incoming.url}`);
+  const jobId = decodeURIComponent(url.pathname.replace(/^\/__r2\//, ""));
+  const partNumber = Number(url.searchParams.get("partNumber"));
+  const uploadId = url.searchParams.get("uploadId");
+  const job = env.__TEST_STORE.jobs.get(jobId);
+  if (!job || uploadId !== job.uploadId || !Number.isInteger(partNumber)) {
+    outgoing.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    outgoing.end("Unknown multipart upload");
+    return;
+  }
+  const upload = env.__TEST_BUCKET.resumeMultipartUpload(job.uploadKey, uploadId);
+  const part = await upload.uploadPart(partNumber, incoming);
+  outgoing.writeHead(200, { ETag: part.etag, "Access-Control-Expose-Headers": "ETag" });
+  outgoing.end();
 }
 
 function run(command, args, options = {}) {
@@ -219,6 +240,7 @@ async function main() {
   };
 
   const server = await startServer(env);
+  env.__TEST_R2_UPLOAD_BASE = server.url;
   try {
     const appResponse = await fetch(`${server.url}/`);
     assert.equal(appResponse.status, 200);
@@ -230,18 +252,39 @@ async function main() {
     const sessionResponse = await fetch(`${server.url}/api/upload-sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inviteCode: "E2E-CODE", slug: "runner", displayName: "E2E Runner" }),
+      body: JSON.stringify({
+        inviteCode: "E2E-CODE",
+        slug: "runner",
+        displayName: "E2E Runner",
+        fileSize: (await stat(exportZip)).size,
+      }),
     });
     assert.equal(sessionResponse.status, 200);
     const session = await sessionResponse.json();
 
     const zipBytes = await readFile(exportZip);
-    const uploadResponse = await fetch(session.uploadUrl, {
+    const partUrlsResponse = await fetch(`${server.url}/api/uploads/${session.jobId}/parts`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ partNumbers: [1] }),
+    });
+    assert.equal(partUrlsResponse.status, 200);
+    const partUrls = await partUrlsResponse.json();
+    const uploadResponse = await fetch(partUrls.urls[0].url, {
       method: "PUT",
-      headers: { "Content-Type": "application/zip", "Content-Length": String(zipBytes.length) },
+      headers: { "Content-Type": "application/zip" },
       body: zipBytes,
     });
     assert.equal(uploadResponse.status, 200);
+    const completeResponse = await fetch(`${server.url}/api/uploads/${session.jobId}/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        size: zipBytes.length,
+        parts: [{ partNumber: 1, etag: uploadResponse.headers.get("etag") }],
+      }),
+    });
+    assert.equal(completeResponse.status, 200);
 
     const queued = await (await fetch(`${server.url}/api/jobs/${session.jobId}`)).json();
     assert.equal(queued.status, "queued");

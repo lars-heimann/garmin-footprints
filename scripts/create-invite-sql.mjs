@@ -26,8 +26,8 @@ if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 1000) {
 const codeHash = await hashInviteCode(code, secret);
 console.log(
   [
-    "INSERT INTO invites (code_hash, max_uses, uses)",
-    `VALUES ('${codeHash}', ${maxUses}, 0)`,
-    "ON CONFLICT(code_hash) DO UPDATE SET max_uses = excluded.max_uses;",
+    "INSERT INTO invites (code_hash, max_uses, uses, reserved_uses)",
+    `VALUES ('${codeHash}', ${maxUses}, 0, 0)`,
+    "ON CONFLICT(code_hash) DO UPDATE SET max_uses = excluded.max_uses, reserved_uses = 0;",
   ].join(" ")
 );

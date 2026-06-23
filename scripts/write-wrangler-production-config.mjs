@@ -31,6 +31,8 @@ config.d1_databases = [
 ];
 config.vars = {
   ...config.vars,
+  R2_ACCOUNT_ID: requiredEnv("CLOUDFLARE_ACCOUNT_ID"),
+  R2_BUCKET_NAME: requiredEnv("R2_BUCKET_NAME"),
   PUBLIC_HOST_SUFFIX: publicHostSuffix,
   PUBLIC_SITE_URL_PATTERN: process.env.PUBLIC_SITE_URL_PATTERN || `https://{slug}.${publicHostSuffix}`,
   GITHUB_REPOSITORY: requiredEnv("GITHUB_REPOSITORY"),

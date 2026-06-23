@@ -6,6 +6,8 @@ import { MemoryBucket, MemoryStore } from "../src/testing.js";
 const INVITE_SECRET = "test-invite-secret";
 const UPLOAD_SECRET = "test-upload-secret";
 const PROCESSOR_TOKEN = "processor-token";
+const ZIP_TEXT = "zip-data";
+const ZIP_SIZE = Buffer.byteLength(ZIP_TEXT);
 
 /**
  * @param {Array<[string, number]>} invites
@@ -18,6 +20,7 @@ async function makeEnv(invites = [["ALPHA-1", 1]]) {
   return {
     __TEST_STORE: store,
     __TEST_BUCKET: new MemoryBucket(),
+    __TEST_R2_UPLOAD_BASE: "https://r2.example.com",
     INVITE_HASH_SECRET: INVITE_SECRET,
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
     PROCESSOR_TOKEN,
@@ -43,13 +46,44 @@ async function json(response) {
   return response.json();
 }
 
-function streamFromText(text) {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(text));
-      controller.close();
-    },
-  });
+function sessionPayload(overrides = {}) {
+  return {
+    inviteCode: "ALPHA-1",
+    slug: "runner",
+    fileSize: ZIP_SIZE,
+    ...overrides,
+  };
+}
+
+async function createSession(env, ctx, overrides = {}) {
+  return worker.fetch(
+    new Request("https://runs.example.com/api/upload-sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sessionPayload(overrides)),
+    }),
+    env,
+    ctx
+  );
+}
+
+async function uploadPartToMemoryBucket(env, session, partNumber = 1, body = ZIP_TEXT) {
+  const job = env.__TEST_STORE.jobs.get(session.jobId);
+  const upload = env.__TEST_BUCKET.resumeMultipartUpload(job.uploadKey, job.uploadId);
+  return upload.uploadPart(partNumber, body);
+}
+
+async function completeTestUpload(env, ctx, session, body = ZIP_TEXT) {
+  const part = await uploadPartToMemoryBucket(env, session, 1, body);
+  return worker.fetch(
+    new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ size: Buffer.byteLength(body), parts: [part] }),
+    }),
+    env,
+    ctx
+  );
 }
 
 test("exposes public upload configuration", async () => {
@@ -66,24 +100,10 @@ test("exposes public upload configuration", async () => {
 test("rejects invalid invites and reserved slugs", async () => {
   const env = await makeEnv();
 
-  const badInvite = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "wrong", slug: "runner" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const badInvite = await createSession(env, waitContext().ctx, { inviteCode: "wrong" });
   assert.equal(badInvite.status, 403);
 
-  const reservedSlug = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "admin" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const reservedSlug = await createSession(env, waitContext().ctx, { slug: "admin" });
   assert.equal(reservedSlug.status, 400);
 });
 
@@ -91,218 +111,209 @@ test("requires Turnstile when configured", async () => {
   const env = await makeEnv();
   env.TURNSTILE_SECRET_KEY = "turnstile-secret";
 
-  const missing = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const missing = await createSession(env, waitContext().ctx);
   assert.equal(missing.status, 400);
 
   env.__TEST_TURNSTILE_RESULT = { ok: false };
-  const failed = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner", turnstileToken: "bad-token" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const failed = await createSession(env, waitContext().ctx, { turnstileToken: "bad-token" });
   assert.equal(failed.status, 403);
 
   env.__TEST_TURNSTILE_RESULT = { ok: true };
-  const passed = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner", turnstileToken: "ok-token" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const passed = await createSession(env, waitContext().ctx, { turnstileToken: "ok-token" });
   assert.equal(passed.status, 200);
 });
 
-test("reserves slugs uniquely and only spends invites when uploads are accepted", async () => {
+test("reserves slugs and invite capacity until multipart completion consumes the invite", async () => {
   const env = await makeEnv([
     ["ALPHA-1", 1],
     ["BETA-2", 2],
   ]);
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
+  const { ctx, pending } = waitContext();
 
-  const first = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-    }),
-    env,
-    waitContext().ctx
-  );
+  const first = await createSession(env, ctx, { displayName: "Runner" });
   assert.equal(first.status, 200);
   const firstSession = await json(first);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 1);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
 
-  const upload = await worker.fetch(
-    new Request(firstSession.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8", "Content-Type": "application/zip" },
-      body: "zip-data",
-    }),
-    env,
-    waitContext().ctx
-  );
-  assert.equal(upload.status, 200);
+  const exhaustedWhileReserved = await createSession(env, ctx, { slug: "runner-two" });
+  assert.equal(exhaustedWhileReserved.status, 403);
+
+  const duplicateSlug = await createSession(env, ctx, { inviteCode: "BETA-2", slug: "runner" });
+  assert.equal(duplicateSlug.status, 409);
+
+  const completed = await completeTestUpload(env, ctx, firstSession);
+  assert.equal(completed.status, 200);
+  await Promise.all(pending);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
 
-  const exhausted = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner-two" }),
-    }),
-    env,
-    waitContext().ctx
-  );
-  assert.equal(exhausted.status, 403);
-
-  const duplicate = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "BETA-2", slug: "runner" }),
-    }),
-    env,
-    waitContext().ctx
-  );
-  assert.equal(duplicate.status, 409);
+  const exhaustedAfterCompletion = await createSession(env, ctx, { slug: "runner-three" });
+  assert.equal(exhaustedAfterCompletion.status, 403);
 });
 
-test("streams uploads, rejects oversized ZIPs, and exposes queued job status", async () => {
+test("creates multipart sessions, signs part URLs, completes uploads, and exposes queued status", async () => {
   const env = await makeEnv();
-  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { ctx, pending } = waitContext();
-  const sessionResponse = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner", displayName: "Runner" }),
-    }),
-    env,
-    ctx
-  );
+  const sessionResponse = await createSession(env, ctx, { displayName: "Runner" });
+  assert.equal(sessionResponse.status, 200);
   const session = await json(sessionResponse);
+  assert.equal(session.uploadMode, "r2-multipart");
+  assert.equal(session.partSizeBytes, 16 * 1024 * 1024);
+  assert.equal(session.maxZipBytes, 32);
+  assert.ok(session.uploadToken);
+  assert.ok(session.expiresAt);
+  assert.equal(session.siteUrl, "https://runner.runs.example.com");
 
-  const tooLarge = await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "33" },
-      body: "x".repeat(33),
+  const signed = await worker.fetch(
+    new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ partNumbers: [1] }),
     }),
     env,
     ctx
   );
-  assert.equal(tooLarge.status, 413);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
+  assert.equal(signed.status, 200);
+  const signedPayload = await json(signed);
+  assert.equal(signedPayload.urls[0].partNumber, 1);
+  assert.match(signedPayload.urls[0].url, /^https:\/\/r2\.example\.com\/__r2\//);
 
-  const missingLength = await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
-  assert.equal(missingLength.status, 411);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
-
-  const upload = await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8", "Content-Type": "application/zip" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
-  assert.equal(upload.status, 200);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
+  const completed = await completeTestUpload(env, ctx, session);
+  assert.equal(completed.status, 200);
+  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), true);
   await Promise.all(pending);
 
   const status = await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx);
   const job = await json(status);
   assert.equal(job.status, "queued");
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), true);
 
   const replay = await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8", "Content-Type": "application/zip" },
-      body: "zip-data",
+    new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        size: ZIP_SIZE,
+        parts: [{ partNumber: 1, etag: `"${String(1).padStart(32, "0")}"` }],
+      }),
     }),
     env,
     ctx
   );
-  assert.equal(replay.status, 409);
+  assert.equal(replay.status, 200);
+  assert.equal((await json(replay)).status, "queued");
 });
 
-test("rejects uploads that exceed the limit even when Content-Length lies", async () => {
+test("rejects sessions that omit file size or exceed the configured ZIP limit", async () => {
   const env = await makeEnv();
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { ctx } = waitContext();
-  const sessionResponse = await worker.fetch(
+
+  const missingSize = await worker.fetch(
     new Request("https://runs.example.com/api/upload-sessions", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
     }),
     env,
     ctx
   );
-  const session = await json(sessionResponse);
+  assert.equal(missingSize.status, 400);
 
-  const upload = await worker.fetch(
-    new Request(
-      session.uploadUrl,
-      /** @type {RequestInit & { duplex?: "half" }} */ ({
-        method: "PUT",
-        headers: { "Content-Length": "1", "Content-Type": "application/zip" },
-        body: streamFromText("x".repeat(64)),
-        duplex: "half",
-      })
-    ),
+  const tooLarge = await createSession(env, ctx, { fileSize: 33 });
+  assert.equal(tooLarge.status, 413);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
+});
+
+test("rejects invalid part URL requests", async () => {
+  const env = await makeEnv();
+  const { ctx } = waitContext();
+  const session = await json(await createSession(env, ctx));
+
+  const missingToken = await worker.fetch(
+    new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
+      method: "POST",
+      body: JSON.stringify({ partNumbers: [1] }),
+    }),
     env,
     ctx
   );
-  assert.equal(upload.status, 413);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
+  assert.equal(missingToken.status, 401);
 
-  const status = await json(
-    await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx)
+  for (const partNumbers of [[0], [2], [1, 1], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
+    const response = await worker.fetch(
+      new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ partNumbers }),
+      }),
+      env,
+      ctx
+    );
+    assert.equal(response.status, 400);
+  }
+});
+
+test("rejects malformed multipart completion payloads", async () => {
+  const env = await makeEnv([["ALPHA-1", 4]]);
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
+  const { ctx } = waitContext();
+
+  const buildInvalidBody = [
+    (part) => ({ size: ZIP_SIZE + 1, parts: [part] }),
+    () => ({ size: ZIP_SIZE, parts: [] }),
+    (part) => ({ size: ZIP_SIZE, parts: [{ partNumber: 2, etag: part.etag }] }),
+    () => ({ size: ZIP_SIZE, parts: [{ partNumber: 1, etag: "not-an-etag" }] }),
+  ];
+
+  for (const [index, buildBody] of buildInvalidBody.entries()) {
+    const session = await json(await createSession(env, ctx, { slug: `runner-${index + 1}` }));
+    const part = await uploadPartToMemoryBucket(env, session);
+    const body = buildBody(part);
+    const response = await worker.fetch(
+      new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      env,
+      ctx
+    );
+    assert.equal(response.status, 400);
+    assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
+    assert.equal(env.__TEST_STORE.slugs.has(`runner-${index + 1}`), false);
+  }
+});
+
+test("abort releases invite reservation and slug", async () => {
+  const env = await makeEnv();
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
+  const { ctx } = waitContext();
+  const session = await json(await createSession(env, ctx));
+
+  const abort = await worker.fetch(
+    new Request(`https://runs.example.com/api/uploads/${session.jobId}/abort`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.uploadToken}` },
+    }),
+    env,
+    ctx
   );
-  assert.equal(status.status, "reserved");
+  assert.equal(abort.status, 200);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
+  assert.equal(env.__TEST_STORE.slugs.has("runner"), false);
+
+  const retry = await createSession(env, ctx);
+  assert.equal(retry.status, 200);
 });
 
 test("processor success stores assets, serves wildcard site, and deletes raw upload", async () => {
   const env = await makeEnv();
   const { ctx } = waitContext();
-  const session = await json(
-    await worker.fetch(
-      new Request("https://runs.example.com/api/upload-sessions", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner", displayName: "Runner" }),
-      }),
-      env,
-      ctx
-    )
-  );
-
-  await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
+  const session = await json(await createSession(env, ctx, { displayName: "Runner" }));
+  await completeTestUpload(env, ctx, session);
 
   const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}` };
   const start = await worker.fetch(
@@ -370,16 +381,7 @@ test("processor success stores assets, serves wildcard site, and deletes raw upl
 test("rejects forged processor callbacks and unauthorized asset names", async () => {
   const env = await makeEnv();
   const { ctx } = waitContext();
-  const session = await json(
-    await worker.fetch(
-      new Request("https://runs.example.com/api/upload-sessions", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-      }),
-      env,
-      ctx
-    )
-  );
+  const session = await json(await createSession(env, ctx));
 
   const forged = await worker.fetch(
     new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/complete`, {
@@ -391,15 +393,7 @@ test("rejects forged processor callbacks and unauthorized asset names", async ()
   );
   assert.equal(forged.status, 401);
 
-  await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
+  await completeTestUpload(env, ctx, session);
   const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}` };
   await worker.fetch(
     new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/start`, {
@@ -425,25 +419,8 @@ test("rejects forged processor callbacks and unauthorized asset names", async ()
 test("processor failure deletes raw upload and records clear status", async () => {
   const env = await makeEnv();
   const { ctx } = waitContext();
-  const session = await json(
-    await worker.fetch(
-      new Request("https://runs.example.com/api/upload-sessions", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-      }),
-      env,
-      ctx
-    )
-  );
-  await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
+  const session = await json(await createSession(env, ctx));
+  await completeTestUpload(env, ctx, session);
 
   const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}`, "Content-Type": "application/json" };
   await worker.fetch(
@@ -478,25 +455,8 @@ test("processor failure deletes raw upload and records clear status", async () =
 test("reaper expires stale jobs and retries raw ZIP deletion", async () => {
   const env = await makeEnv();
   const { ctx } = waitContext();
-  const session = await json(
-    await worker.fetch(
-      new Request("https://runs.example.com/api/upload-sessions", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-      }),
-      env,
-      ctx
-    )
-  );
-  await worker.fetch(
-    new Request(session.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Length": "8" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
+  const session = await json(await createSession(env, ctx));
+  await completeTestUpload(env, ctx, session);
 
   const stale = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   await env.__TEST_STORE.updateJob(session.jobId, { status: "processing", updatedAt: stale });
@@ -513,33 +473,19 @@ test("reaper expires stale jobs and retries raw ZIP deletion", async () => {
   assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
 });
 
-test("reaper releases slugs for stale reserved upload sessions", async () => {
+test("reaper aborts stale multipart uploads and releases slugs and invites", async () => {
   const env = await makeEnv();
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { ctx } = waitContext();
-  const session = await json(
-    await worker.fetch(
-      new Request("https://runs.example.com/api/upload-sessions", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-      }),
-      env,
-      ctx
-    )
-  );
+  const session = await json(await createSession(env, ctx));
 
-  const stale = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const stale = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
   await env.__TEST_STORE.updateJob(session.jobId, { updatedAt: stale });
   const result = await reapStaleJobs(env, Date.now());
 
   assert.equal(result.expired, 1);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.slugs.has("runner"), false);
-  const retry = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
-    }),
-    env,
-    ctx
-  );
+  const retry = await createSession(env, ctx);
   assert.equal(retry.status, 200);
 });

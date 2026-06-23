@@ -116,6 +116,27 @@ async function writeResponse(outgoing, response) {
   }
 }
 
+async function handleFakeR2PartUpload(incoming, outgoing, env) {
+  const url = new URL(`http://127.0.0.1${incoming.url}`);
+  const jobId = decodeURIComponent(url.pathname.replace(/^\/__r2\//, ""));
+  const partNumber = Number(url.searchParams.get("partNumber"));
+  const uploadId = url.searchParams.get("uploadId");
+  const job = env.__TEST_STORE.jobs.get(jobId);
+  if (!job || uploadId !== job.uploadId || !Number.isInteger(partNumber)) {
+    outgoing.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    outgoing.end("Unknown multipart upload");
+    return;
+  }
+  const upload = env.__TEST_BUCKET.resumeMultipartUpload(job.uploadKey, uploadId);
+  const part = await upload.uploadPart(partNumber, incoming);
+  outgoing.writeHead(200, {
+    ETag: part.etag,
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "ETag",
+  });
+  outgoing.end();
+}
+
 async function main() {
   const port = parsePort();
   const store = new MemoryStore();
@@ -129,23 +150,39 @@ async function main() {
     PROCESSOR_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.localhost",
     PUBLIC_SITE_URL_PATTERN: `http://{slug}.runs.localhost:${port}`,
-    MAX_ZIP_BYTES: String(500 * 1024 * 1024),
+    MAX_ZIP_BYTES: String(1024 * 1024 * 1024),
+    __TEST_R2_UPLOAD_BASE: `http://127.0.0.1:${port}`,
     DEFAULT_MAX_POINTS: "900000",
   };
   const workDir = await mkdtemp(join(tmpdir(), "garmin-footprints-local-"));
 
   const server = createServer(async (incoming, outgoing) => {
     const effectiveHost = incoming.headers.host || `127.0.0.1:${port}`;
-    const request = requestToWorkerRequest(incoming, effectiveHost);
     const pending = [];
     try {
+      if (incoming.method === "OPTIONS" && incoming.url?.startsWith("/__r2/")) {
+        outgoing.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "PUT,OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Max-Age": "3600",
+        });
+        outgoing.end();
+        return;
+      }
+      if (incoming.method === "PUT" && incoming.url?.startsWith("/__r2/")) {
+        await handleFakeR2PartUpload(incoming, outgoing, env);
+        return;
+      }
+
+      const request = requestToWorkerRequest(incoming, effectiveHost);
       const response = await worker.fetch(request, env, {
         waitUntil(promise) {
           pending.push(promise);
         },
       });
 
-      if (incoming.method === "PUT" && incoming.url?.startsWith("/api/uploads/") && response.ok) {
+      if (incoming.method === "POST" && /^\/api\/uploads\/[^/]+\/complete$/.test(incoming.url || "") && response.ok) {
         const clone = response.clone();
         await writeResponse(outgoing, response);
         const payload = await clone.json().catch(() => null);
