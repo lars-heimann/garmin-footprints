@@ -565,6 +565,24 @@ function percentile(values, fraction) {
   return values[lower] * (1 - weight) + values[upper] * weight;
 }
 
+function minMaxNumbers(values) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of values) {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return [min, max];
+}
+
+function minNumber(values) {
+  let min = Infinity;
+  for (const value of values) {
+    if (value < min) min = value;
+  }
+  return min;
+}
+
 function densestClusterBounds(projected, cellSize, radiusCells) {
   const counts = new Map();
   for (const [x, y] of projected) {
@@ -588,7 +606,9 @@ function densestClusterBounds(projected, cellSize, radiusCells) {
   if (selected.length < 1000) throw new Error("Densest cluster was too small for a useful initial view.");
   const xs = selected.map((row) => row[0]);
   const ys = selected.map((row) => row[1]);
-  return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), selected.length];
+  const [minX, maxX] = minMaxNumbers(xs);
+  const [minY, maxY] = minMaxNumbers(ys);
+  return [minX, maxX, minY, maxY, selected.length];
 }
 
 function parseStartDate(value) {
@@ -615,12 +635,9 @@ function generateAssets(projected, stats, options) {
   const xs = projected.map((row) => row[0]);
   const ys = projected.map((row) => row[1]);
   const ts = projected.map((row) => row[2]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const minT = Math.min(...ts);
-  const maxT = Math.max(...ts);
+  const [minX, maxX] = minMaxNumbers(xs);
+  const [minY, maxY] = minMaxNumbers(ys);
+  const [minT, maxT] = minMaxNumbers(ts);
   let renderMinX;
   let renderMaxX;
   let renderMinY;
@@ -817,7 +834,7 @@ export async function buildVisualizationFromGarminFile(file, options = {}) {
             stats.skippedNoTimestamp += 1;
             continue;
           }
-          const fitStart = Math.min(...timestamps) + GARMIN_EPOCH;
+          const fitStart = minNumber(timestamps) + GARMIN_EPOCH;
           if (fitStart < startTimestamp) {
             stats.skippedBeforeStart += 1;
             continue;

@@ -95,6 +95,12 @@ test("exposes public upload configuration", async () => {
   assert.equal(config.turnstileSiteKey, "site-key");
   assert.equal(config.maxZipBytes, 32);
   assert.equal(config.publicHostSuffix, "runs.example.com");
+
+  env.ASSETS = { fetch: async () => new Response("<!doctype html>", { headers: { "Content-Type": "text/html" } }) };
+  const page = await worker.fetch(new Request("https://runs.example.com/"), env, waitContext().ctx);
+  const csp = page.headers.get("Content-Security-Policy") || "";
+  assert.match(csp, /frame-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /frame-ancestors 'self'/);
 });
 
 test("rejects invalid invites and reserved slugs", async () => {

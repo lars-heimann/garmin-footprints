@@ -298,3 +298,29 @@ test("FIT parser accepts the full FIT uint8 field-count range", () => {
   fit.set(data, header.byteLength);
   assert.deepEqual(parseFitRecords(fit), []);
 });
+
+test("browser processor handles large point arrays without call stack overflow", async () => {
+  const dir = await tempDir();
+  const exportZip = join(dir, "large.zip");
+  runPython(
+    `
+import json, sys, zipfile
+from pathlib import Path
+from processor.tests.fixtures import make_fit
+base = Path(sys.argv[1]).parent
+activities = base / "activities.zip"
+with zipfile.ZipFile(activities, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("large-activity.fit", make_fit(points=150000))
+summary = [{"summarizedActivitiesExport": [{"activityId": 12345, "activityType": "running", "name": "Long Run", "beginTimestamp": 1710000000 * 1000, "distance": 100000}]}]
+with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("DI_CONNECT/DI-Connect-Fitness/test_summarizedActivities.json", json.dumps(summary))
+    archive.write(activities, "DI_CONNECT/DI-Connect-Uploaded-Files/activities.zip")
+`,
+    [exportZip]
+  );
+
+  const result = await buildWithJs(exportZip, { maxPoints: 200000 });
+  assert.equal(result.meta.parsedRunActivities, 1);
+  assert.ok(result.meta.pointCount > 100000);
+  assert.equal(result.points.byteLength, result.meta.pointCount * 12);
+});
