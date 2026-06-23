@@ -96,7 +96,7 @@ jobs:
           TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
           PROCESSOR_REF: main
           PROCESSOR_WORKFLOW: process-job.yml
-        run: node scripts/write-wrangler-production-config.mjs /tmp/wrangler.prod.jsonc
+        run: node scripts/write-wrangler-production-config.mjs apps/worker/wrangler.prod.generated.jsonc
 
       - name: Upload Worker secrets
         env:
@@ -119,13 +119,13 @@ jobs:
           }
           fs.writeFileSync("/tmp/wrangler-secrets.json", JSON.stringify(secrets));
           NODE
-          npx wrangler secret bulk /tmp/wrangler-secrets.json --config /tmp/wrangler.prod.jsonc
+          npx wrangler secret bulk /tmp/wrangler-secrets.json --config apps/worker/wrangler.prod.generated.jsonc
 
       - name: Apply D1 migrations
-        run: npx wrangler d1 migrations apply "$D1_DATABASE_NAME" --config /tmp/wrangler.prod.jsonc --remote
+        run: npx wrangler d1 migrations apply "$D1_DATABASE_NAME" --config apps/worker/wrangler.prod.generated.jsonc --remote
 
       - name: Deploy Worker
-        run: npx wrangler deploy --config /tmp/wrangler.prod.jsonc
+        run: npx wrangler deploy --config apps/worker/wrangler.prod.generated.jsonc
 
       - name: OpenTofu apply Worker routes
         run: tofu -chdir=infra/prod apply -auto-approve

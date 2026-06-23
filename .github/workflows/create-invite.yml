@@ -42,7 +42,7 @@ jobs:
         run: npm ci
 
       - name: Generate Wrangler config
-        run: node scripts/write-wrangler-production-config.mjs /tmp/wrangler.prod.jsonc
+        run: node scripts/write-wrangler-production-config.mjs apps/worker/wrangler.prod.generated.jsonc
 
       - name: Insert invite hash
         env:
@@ -55,4 +55,4 @@ jobs:
           fi
           echo "::add-mask::$INVITE_CODE"
           SQL=$(node scripts/create-invite-sql.mjs --code "$INVITE_CODE" --max-uses "$MAX_USES" --secret "$INVITE_HASH_SECRET")
-          npx wrangler d1 execute "$D1_DATABASE_NAME" --config /tmp/wrangler.prod.jsonc --remote --command "$SQL"
+          npx wrangler d1 execute "$D1_DATABASE_NAME" --config apps/worker/wrangler.prod.generated.jsonc --remote --command "$SQL"
