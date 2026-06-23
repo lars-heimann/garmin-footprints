@@ -1,0 +1,1 @@
+"""Garmin Footprints processing package."""

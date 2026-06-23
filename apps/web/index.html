@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Garmin Footprints</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <div class="intro">
+          <p class="eyebrow">Invite-only Garmin map builder</p>
+          <h1>Publish a shareable running footprint map from your Garmin export.</h1>
+          <p class="privacy">
+            Raw ZIP uploads are used only for processing and are deleted after success or failure.
+            Starts and finishes are trimmed before the public map is generated.
+          </p>
+        </div>
+
+        <form id="uploadForm" class="upload-panel">
+          <fieldset>
+            <legend>Garmin export</legend>
+            <ol class="guide">
+              <li>Open Garmin Connect account data export.</li>
+              <li>Request and download your account ZIP.</li>
+              <li>Upload the ZIP unchanged.</li>
+            </ol>
+            <label class="file-drop">
+              <span id="fileLabel">Choose Garmin ZIP</span>
+              <input id="zipFile" name="zipFile" type="file" accept=".zip,application/zip" required />
+            </label>
+          </fieldset>
+
+          <fieldset class="grid">
+            <legend>Public map</legend>
+            <label>
+              Invite code
+              <input id="inviteCode" name="inviteCode" autocomplete="one-time-code" required />
+            </label>
+            <label>
+              Slug
+              <input id="slug" name="slug" inputmode="latin" pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" required />
+            </label>
+            <label class="wide">
+              Display name
+              <input id="displayName" name="displayName" maxlength="80" placeholder="Optional" />
+            </label>
+          </fieldset>
+
+          <button id="submitButton" type="submit">Start upload</button>
+        </form>
+      </section>
+
+      <aside class="progress-panel" aria-live="polite">
+        <h2>Status</h2>
+        <p id="statusText">Waiting for a Garmin ZIP.</p>
+        <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
+        <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
+      </aside>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

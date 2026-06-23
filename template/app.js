@@ -1,5 +1,7 @@
 const canvas = document.getElementById("scene");
 const errorBox = document.getElementById("error");
+const mapTitleEl = document.getElementById("mapTitle");
+const aboutMapEl = document.getElementById("aboutMap");
 const pointCountEl = document.getElementById("pointCount");
 const runCountEl = document.getElementById("runCount");
 const dateRangeEl = document.getElementById("dateRange");
@@ -124,6 +126,10 @@ function formatDay(date) {
   }).format(date);
 }
 
+function totalRuns() {
+  return state.meta.parsedRunActivities || state.meta.runCount || 0;
+}
+
 function currentDateFromProgress() {
   const start = new Date(state.meta.start).getTime();
   const end = new Date(state.meta.end).getTime();
@@ -148,12 +154,12 @@ function countVisiblePoints() {
 }
 
 function countVisibleRuns() {
-  const totalRuns = state.meta.parsedRunActivities;
+  const runTotal = totalRuns();
   const runProgress = state.meta.runProgress;
   if (state.progress <= 0) return 0;
-  if (state.progress >= 1) return totalRuns;
+  if (state.progress >= 1) return runTotal;
   if (!Array.isArray(runProgress)) {
-    return Math.min(totalRuns, Math.floor(totalRuns * state.progress));
+    return Math.min(runTotal, Math.floor(runTotal * state.progress));
   }
 
   let low = 0;
@@ -172,7 +178,7 @@ function countVisibleRuns() {
 function updateHud() {
   const progressPercent = Math.round(state.progress * 1000) / 10;
   pointCountEl.textContent = `${formatNumber(countVisiblePoints())} / ${formatNumber(state.meta.pointCount)}`;
-  runCountEl.textContent = `${formatNumber(countVisibleRuns())} / ${formatNumber(state.meta.parsedRunActivities)}`;
+  runCountEl.textContent = `${formatNumber(countVisibleRuns())} / ${formatNumber(totalRuns())}`;
   currentDateEl.textContent = `${formatDay(currentDateFromProgress())} - ${progressPercent.toFixed(1)}%`;
   meterFill.style.width = `${state.progress * 100}%`;
   timeSlider.value = String(Math.round(state.progress * 1000));
@@ -271,7 +277,7 @@ function capturePointer(event) {
   try {
     canvas.setPointerCapture(event.pointerId);
   } catch {
-    // Some synthetic events do not have browser pointer capture behind them.
+    // Synthetic events in some tests do not expose pointer capture.
   }
 }
 
@@ -358,14 +364,6 @@ function bindControls() {
     { passive: false }
   );
 
-  canvas.addEventListener(
-    "gesturestart",
-    (event) => {
-      event.preventDefault();
-    },
-    { passive: false }
-  );
-
   window.addEventListener("resize", () => {
     state.needsRender = true;
   });
@@ -385,6 +383,16 @@ async function loadData() {
   if (state.points.length !== state.meta.pointCount * 3) {
     throw new Error("Point binary size does not match metadata.");
   }
+}
+
+function applyMetadata() {
+  const title = state.meta.viewerTitle || "Running Footprints";
+  document.title = title;
+  mapTitleEl.textContent = title;
+  if (state.meta.displayName) {
+    aboutMapEl.textContent = `${state.meta.displayName}'s running routes from a Garmin account export. Brighter streets were run more often.`;
+  }
+  dateRangeEl.textContent = `${formatMonth(new Date(state.meta.start))} - ${formatMonth(new Date(state.meta.end))}`;
 }
 
 function initializeGl() {
@@ -418,7 +426,7 @@ function initializeGl() {
 async function main() {
   try {
     await loadData();
-    dateRangeEl.textContent = `${formatMonth(new Date(state.meta.start))} - ${formatMonth(new Date(state.meta.end))}`;
+    applyMetadata();
     initializeGl();
     bindControls();
     requestAnimationFrame(frame);

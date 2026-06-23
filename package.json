@@ -1,0 +1,13 @@
+{
+  "name": "garmin-footprints",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:local": "node scripts/local-dev-server.mjs",
+    "test": "npm run test:worker && npm run test:processor && npm run test:e2e",
+    "test:worker": "node --test apps/worker/test/*.test.mjs",
+    "test:processor": "python3 -m unittest discover -s processor/tests -p 'test_*.py'",
+    "test:e2e": "node tests/e2e/local-flow.mjs"
+  }
+}

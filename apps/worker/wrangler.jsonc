@@ -1,0 +1,33 @@
+{
+  "name": "garmin-footprints",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../web",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "r2_buckets": [
+    {
+      "binding": "SITE_BUCKET",
+      "bucket_name": "garmin-footprints"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "garmin-footprints",
+      "database_id": "replace-with-your-d1-database-id"
+    }
+  ],
+  "vars": {
+    "PUBLIC_HOST_SUFFIX": "runs.example.com",
+    "MAX_ZIP_BYTES": "524288000",
+    "DEFAULT_START_DATE": "2022-05-01",
+    "DEFAULT_MAX_POINTS": "900000"
+  }
+}

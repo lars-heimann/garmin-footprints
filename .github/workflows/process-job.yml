@@ -1,0 +1,33 @@
+name: Process Garmin Footprints Job
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: Worker job ID to process
+        required: true
+        type: string
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install processor dependencies
+        run: python -m pip install -r processor/requirements.txt
+
+      - name: Process job
+        env:
+          WORKER_API_BASE: ${{ secrets.WORKER_API_BASE }}
+          PROCESSOR_TOKEN: ${{ secrets.PROCESSOR_TOKEN }}
+        run: >-
+          python processor/process_job.py
+          --job-id "${{ inputs.jobId }}"
+          --api-base "$WORKER_API_BASE"
+          --processor-token "$PROCESSOR_TOKEN"
+          --template-dir template

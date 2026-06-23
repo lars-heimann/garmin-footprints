@@ -1,6 +1,5 @@
 :root {
-  --corner-radius: 20px;
-  --corner-shape: round;
+  --corner-radius: 12px;
   color-scheme: dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -56,8 +55,7 @@ canvas:active {
 .controls {
   border: 1px solid rgba(244, 241, 232, 0.14);
   border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
-  background: rgba(5, 7, 8, 0.72);
+  background: rgba(5, 7, 8, 0.74);
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(18px);
 }
@@ -80,8 +78,8 @@ canvas:active {
 h1 {
   max-width: 22rem;
   margin: 0;
-  font-size: clamp(1.55rem, 4vw, 3.25rem);
-  line-height: 1.02;
+  font-size: clamp(1.55rem, 2.2rem, 3.25rem);
+  line-height: 1.04;
   letter-spacing: 0;
 }
 
@@ -104,7 +102,7 @@ dd {
   margin: 0.2rem 0 0;
   overflow-wrap: anywhere;
   color: #fffaf0;
-  font-size: clamp(0.88rem, 2.4vw, 1.05rem);
+  font-size: 0.96rem;
   font-weight: 700;
 }
 
@@ -163,56 +161,6 @@ dd {
   margin-top: 0.55rem;
 }
 
-.about-map-content .inspiration {
-  color: rgba(244, 241, 232, 0.56);
-  font-size: 0.78rem;
-}
-
-.inspiration a {
-  color: #f0bd5f;
-  font-weight: 750;
-  text-decoration: none;
-}
-
-.inspiration a:hover,
-.inspiration a:focus-visible {
-  color: #fff8e8;
-  text-decoration: underline;
-  outline: none;
-}
-
-.profile-links {
-  display: flex;
-  gap: 0.45rem;
-  margin-top: 0.75rem;
-}
-
-.profile-links a {
-  display: grid;
-  width: 2.1rem;
-  height: 2.1rem;
-  place-items: center;
-  border: 1px solid rgba(244, 241, 232, 0.16);
-  border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
-  background: rgba(244, 241, 232, 0.07);
-  color: rgba(244, 241, 232, 0.84);
-}
-
-.profile-links a:hover,
-.profile-links a:focus-visible {
-  border-color: rgba(240, 189, 95, 0.72);
-  background: rgba(240, 189, 95, 0.14);
-  color: #fff8e8;
-  outline: none;
-}
-
-.profile-links svg {
-  width: 1rem;
-  height: 1rem;
-  fill: currentColor;
-}
-
 .status {
   min-width: min(21rem, calc(100vw - 2rem));
   padding: 0.85rem 1rem;
@@ -228,8 +176,7 @@ dd {
 .meter {
   height: 0.35rem;
   overflow: hidden;
-  border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
+  border-radius: 999px;
   background: rgba(244, 241, 232, 0.14);
 }
 
@@ -252,35 +199,10 @@ dd {
   padding: 0.75rem;
 }
 
-.corner-lab {
-  position: fixed;
-  top: 7rem;
-  right: clamp(1rem, 3vw, 2rem);
-  width: min(18rem, calc(100vw - 2rem));
-  border: 1px solid rgba(244, 241, 232, 0.14);
-  border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
-  background: rgba(5, 7, 8, 0.72);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
-  padding: 0.7rem;
-}
-
-.corner-lab label {
-  grid-template-columns: 1fr auto;
-  gap: 0.55rem 0.75rem;
-}
-
-.corner-lab output {
-  color: #fff8e8;
-  font-variant-numeric: tabular-nums;
-}
-
 button {
   min-height: 2.55rem;
   border: 1px solid rgba(244, 241, 232, 0.18);
-  border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
+  border-radius: 10px;
   background: rgba(244, 241, 232, 0.08);
   color: #fff8e8;
   padding: 0 0.9rem;
@@ -319,7 +241,6 @@ input[type="range"] {
   margin: 0;
   border: 1px solid rgba(255, 121, 91, 0.45);
   border-radius: var(--corner-radius);
-  corner-shape: var(--corner-shape);
   background: rgba(82, 18, 14, 0.84);
   color: #ffe8df;
   padding: 1rem;
@@ -347,14 +268,6 @@ input[type="range"] {
 
   .controls {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .corner-lab {
-    top: auto;
-    right: 1rem;
-    bottom: 11rem;
-    left: 1rem;
-    width: auto;
   }
 
   label {
