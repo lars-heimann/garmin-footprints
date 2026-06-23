@@ -10,21 +10,34 @@ import math
 import random
 import re
 import shutil
+import stat
 import struct
 import sys
 import tempfile
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import IntEnum
 from pathlib import Path, PurePosixPath
-from typing import Iterable
-
 
 GARMIN_EPOCH = 631065600
 SEMICIRCLE_TO_DEGREES = 180.0 / (2**31)
 MAX_ZIP_MEMBERS = 120_000
 MAX_UNCOMPRESSED_BYTES = 12 * 1024 * 1024 * 1024
+MAX_ZIP_MEMBER_BYTES = 750 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 100
+MAX_WHOLE_ARCHIVE_COMPRESSION_RATIO = 80
+MAX_NESTED_ACTIVITY_ZIPS = 2_000
+MAX_SUMMARY_JSON_BYTES = 50 * 1024 * 1024
+MAX_FIT_FILE_BYTES = 50 * 1024 * 1024
+MAX_FIT_FILES = 40_000
+MAX_FIT_RECORDS = 3_000_000
+MAX_FIT_FIELD_COUNT = 128
+MAX_FIT_FIELD_SIZE = 1024
+MAX_PARSED_POINTS_BEFORE_DOWNSAMPLING = 8_000_000
+MIN_ACTIVITY_UNIX_SECONDS = 946684800
+MAX_ACTIVITY_UNIX_SECONDS = 4102444800
 RUN_ACTIVITY_TYPES = {
     "running",
     "track_running",
@@ -34,6 +47,14 @@ RUN_ACTIVITY_TYPES = {
     "treadmill_running",
 }
 TEMPLATE_FILES = ("index.html", "app.js", "styles.css")
+WINDOWS_DEVICE_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *{f"COM{index}" for index in range(1, 10)},
+    *{f"LPT{index}" for index in range(1, 10)},
+}
 
 BASE_TYPE_FORMATS = {
     0: ("B", 1),
@@ -73,9 +94,25 @@ class InvalidZipError(ProcessorError):
     code = "INVALID_ZIP"
 
 
+class ZipTooLargeError(InvalidZipError):
+    code = "ZIP_TOO_LARGE"
+
+
+class ZipUnusualCompressionError(InvalidZipError):
+    code = "ZIP_UNUSUAL_COMPRESSION"
+
+
 class NoRunsFoundError(ProcessorError):
     exit_code = ExitCode.NO_RUNS_FOUND
     code = "NO_RUNS_FOUND"
+
+
+class GarminExportNotFoundError(NoRunsFoundError):
+    code = "GARMIN_EXPORT_NOT_FOUND"
+
+
+class GarminActivityFilesMissingError(NoRunsFoundError):
+    code = "GARMIN_ACTIVITY_FILES_MISSING"
 
 
 class ParserFailureError(ProcessorError):
@@ -129,29 +166,43 @@ def decode_value(raw: bytes, field: FieldDef, endian: str):
     return values[0] if len(values) == 1 else values
 
 
-def parse_fit_records(blob: bytes) -> list[tuple[int | None, float, float]]:
+def validate_fit_timestamp(timestamp: int | None) -> None:
+    if timestamp is None:
+        return
+    unix_seconds = timestamp + GARMIN_EPOCH
+    if not MIN_ACTIVITY_UNIX_SECONDS <= unix_seconds <= MAX_ACTIVITY_UNIX_SECONDS:
+        raise ParserFailureError("FIT timestamp is outside the allowed range.")
+
+
+def parse_fit_records(blob: bytes, *, max_records: int = MAX_FIT_RECORDS) -> list[tuple[int | None, float, float]]:
     if len(blob) < 14:
-        return []
+        raise ParserFailureError("FIT file is too small.")
     header_size = blob[0]
     if header_size not in (12, 14) or blob[8:12] != b".FIT":
-        return []
+        raise ParserFailureError("FIT file header is invalid.")
     data_size = struct.unpack_from("<I", blob, 4)[0]
     offset = header_size
-    end = min(len(blob), header_size + data_size)
+    end = header_size + data_size
+    if end > len(blob):
+        raise ParserFailureError("FIT file data section is truncated.")
     definitions: dict[int, MessageDef] = {}
     records: list[tuple[int | None, float, float]] = []
     last_timestamp: int | None = None
+    scanned_records = 0
 
     while offset < end:
         header = blob[offset]
         offset += 1
+        scanned_records += 1
+        if scanned_records > max_records:
+            raise ParserFailureError("FIT file contains too many records.")
 
         if header & 0x80:
             local_num = (header >> 5) & 0x03
             timestamp_offset = header & 0x1F
             msg_def = definitions.get(local_num)
             if not msg_def or offset + msg_def.size > end:
-                break
+                raise ParserFailureError("FIT compressed timestamp record is malformed.")
             payload = blob[offset : offset + msg_def.size]
             offset += msg_def.size
             timestamp = None
@@ -159,6 +210,7 @@ def parse_fit_records(blob: bytes) -> list[tuple[int | None, float, float]]:
                 timestamp = (last_timestamp & ~0x1F) + timestamp_offset
                 if timestamp <= last_timestamp - 16:
                     timestamp += 32
+                validate_fit_timestamp(timestamp)
                 last_timestamp = timestamp
             add_record_point(records, msg_def, payload, timestamp)
             continue
@@ -166,43 +218,62 @@ def parse_fit_records(blob: bytes) -> list[tuple[int | None, float, float]]:
         is_definition = bool(header & 0x40)
         local_num = header & 0x0F
         has_developer_fields = bool(header & 0x20)
+        if header & 0x10:
+            raise ParserFailureError("FIT record header uses reserved bits.")
 
         if is_definition:
             if offset + 5 > end:
-                break
+                raise ParserFailureError("FIT definition record is truncated.")
             offset += 1
             architecture = blob[offset]
             offset += 1
+            if architecture not in (0, 1):
+                raise ParserFailureError("FIT architecture flag is invalid.")
             endian = "big" if architecture else "little"
             prefix = ">" if endian == "big" else "<"
             global_num = struct.unpack_from(prefix + "H", blob, offset)[0]
             offset += 2
             field_count = blob[offset]
             offset += 1
+            if field_count > MAX_FIT_FIELD_COUNT:
+                raise ParserFailureError("FIT definition contains too many fields.")
             fields: list[FieldDef] = []
             total_size = 0
             for _ in range(field_count):
                 if offset + 3 > end:
-                    return records
+                    raise ParserFailureError("FIT field definition is truncated.")
                 number, size, base_type = blob[offset], blob[offset + 1], blob[offset + 2]
+                if size > MAX_FIT_FIELD_SIZE:
+                    raise ParserFailureError("FIT field is too large.")
                 fields.append(FieldDef(number, size, base_type))
                 total_size += size
                 offset += 3
             if has_developer_fields:
                 if offset >= end:
-                    return records
-                dev_field_count = blob[offset]
-                offset += 1 + 3 * dev_field_count
+                    raise ParserFailureError("FIT developer field definition is truncated.")
+                developer_field_count = blob[offset]
+                offset += 1
+                if developer_field_count > MAX_FIT_FIELD_COUNT:
+                    raise ParserFailureError("FIT definition contains too many developer fields.")
+                for _ in range(developer_field_count):
+                    if offset + 3 > end:
+                        raise ParserFailureError("FIT developer field definition is truncated.")
+                    size = blob[offset + 1]
+                    if size > MAX_FIT_FIELD_SIZE:
+                        raise ParserFailureError("FIT developer field is too large.")
+                    total_size += size
+                    offset += 3
             definitions[local_num] = MessageDef(global_num, endian, fields, total_size)
             continue
 
         msg_def = definitions.get(local_num)
         if not msg_def or offset + msg_def.size > end:
-            break
+            raise ParserFailureError("FIT data record is missing a valid definition.")
         payload = blob[offset : offset + msg_def.size]
         offset += msg_def.size
         timestamp = add_record_point(records, msg_def, payload, None)
         if timestamp is not None:
+            validate_fit_timestamp(timestamp)
             last_timestamp = timestamp
 
     return records
@@ -243,32 +314,103 @@ def add_record_point(
 
     lat = lat_raw * SEMICIRCLE_TO_DEGREES
     lon = lon_raw * SEMICIRCLE_TO_DEGREES
-    if -90 <= lat <= 90 and -180 <= lon <= 180 and not (lat == 0 and lon == 0):
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ParserFailureError("FIT coordinate is outside the allowed range.")
+    if not (lat == 0 and lon == 0):
         records.append((timestamp, lat, lon))
+        if len(records) > MAX_PARSED_POINTS_BEFORE_DOWNSAMPLING:
+            raise ParserFailureError("FIT file contains too many GPS points.")
     return timestamp
 
 
-def validate_zip_member(info: zipfile.ZipInfo) -> None:
+def validate_zip_signature(zip_path: Path) -> None:
+    try:
+        with zip_path.open("rb") as file:
+            signature = file.read(4)
+    except OSError as error:
+        raise InvalidZipError("ZIP file could not be read.") from error
+    if signature not in (b"PK\x03\x04", b"PK\x05\x06"):
+        raise InvalidZipError("Input is not a valid ZIP file.")
+
+
+def normalized_zip_name(info: zipfile.ZipInfo) -> str:
     name = info.filename
     if "\0" in name or "\\" in name:
         raise InvalidZipError(f"Suspicious ZIP member path: {name!r}")
     path = PurePosixPath(name)
-    if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+    if path.is_absolute() or not path.parts or any(part in ("", ".", "..") for part in path.parts):
         raise InvalidZipError(f"Suspicious ZIP member path: {name!r}")
+    parts = tuple(part for part in path.parts if part != "/")
+    if any(part.startswith(".") for part in parts):
+        raise InvalidZipError(f"Suspicious ZIP member path: {name!r}")
+    if parts and parts[0] == "__MACOSX":
+        raise InvalidZipError("ZIP contains hidden macOS metadata.")
+    for part in parts:
+        stem = part.split(".", 1)[0].upper().rstrip(" ")
+        if stem in WINDOWS_DEVICE_NAMES:
+            raise InvalidZipError(f"ZIP member uses a reserved Windows device name: {name!r}")
+    return "/".join(parts).rstrip("/")
 
 
-def validate_zip_file(zip_path: Path) -> None:
+def validate_zip_member(info: zipfile.ZipInfo) -> str:
+    normalized = normalized_zip_name(info)
+    mode = (info.external_attr >> 16) & 0xFFFF
+    file_type = stat.S_IFMT(mode)
+    if file_type:
+        if file_type == stat.S_IFLNK:
+            raise InvalidZipError(f"ZIP member is a symlink: {info.filename!r}")
+        if file_type not in (stat.S_IFREG, stat.S_IFDIR):
+            raise InvalidZipError(f"ZIP member is not a regular file: {info.filename!r}")
+    return normalized
+
+
+def bounded_zip_read(
+    archive: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    max_bytes: int,
+    *,
+    message: str,
+) -> bytes:
+    if info.file_size > max_bytes:
+        raise ZipTooLargeError(message)
+    return archive.read(info)
+
+
+def validate_zip_file(
+    zip_path: Path,
+    *,
+    max_members: int = MAX_ZIP_MEMBERS,
+    max_uncompressed_bytes: int = MAX_UNCOMPRESSED_BYTES,
+    max_member_bytes: int = MAX_ZIP_MEMBER_BYTES,
+) -> None:
+    validate_zip_signature(zip_path)
     try:
         with zipfile.ZipFile(zip_path) as archive:
             infos = archive.infolist()
-            if len(infos) > MAX_ZIP_MEMBERS:
+            if len(infos) > max_members:
                 raise InvalidZipError("ZIP contains too many files.")
-            total = 0
+            total_uncompressed = 0
+            total_compressed = 0
+            seen_names: set[str] = set()
             for info in infos:
-                validate_zip_member(info)
-                total += info.file_size
-            if total > MAX_UNCOMPRESSED_BYTES:
-                raise InvalidZipError("ZIP uncompressed contents are too large.")
+                normalized = validate_zip_member(info)
+                if normalized in seen_names:
+                    raise InvalidZipError(f"ZIP contains duplicate member path: {normalized!r}")
+                seen_names.add(normalized)
+                if info.is_dir():
+                    continue
+                if info.file_size > max_member_bytes:
+                    raise ZipTooLargeError("ZIP member is too large.")
+                total_uncompressed += info.file_size
+                total_compressed += info.compress_size
+                if info.compress_size == 0 and info.file_size > 0:
+                    raise ZipUnusualCompressionError("ZIP member has an unusual compression ratio.")
+                if info.compress_size > 0 and info.file_size / info.compress_size > MAX_COMPRESSION_RATIO:
+                    raise ZipUnusualCompressionError("ZIP member has an unusual compression ratio.")
+            if total_uncompressed > max_uncompressed_bytes:
+                raise ZipTooLargeError("ZIP uncompressed contents are too large.")
+            if total_compressed > 0 and total_uncompressed / total_compressed > MAX_WHOLE_ARCHIVE_COMPRESSION_RATIO:
+                raise ZipUnusualCompressionError("ZIP has an unusual compression ratio.")
             bad_member = archive.testzip()
             if bad_member:
                 raise InvalidZipError(f"ZIP member failed CRC check: {bad_member}")
@@ -279,7 +421,7 @@ def validate_zip_file(zip_path: Path) -> None:
 def parse_garmin_millis(value) -> int:
     if value is None:
         return 0
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return int(value)
     text = str(value).strip()
     if not text:
@@ -291,39 +433,84 @@ def parse_garmin_millis(value) -> int:
     except ValueError:
         return 0
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return int(parsed.timestamp() * 1000)
+
+
+def validate_activity_millis(value: int, *, context: str) -> None:
+    if value <= 0:
+        raise ParserFailureError(f"{context} timestamp is missing or invalid.")
+    seconds = value // 1000
+    if not MIN_ACTIVITY_UNIX_SECONDS <= seconds <= MAX_ACTIVITY_UNIX_SECONDS:
+        raise ParserFailureError(f"{context} timestamp is outside the allowed range.")
 
 
 def iter_summarized_activities(export_zip: Path) -> list[Activity]:
     activities: list[Activity] = []
+    has_di_connect = False
+    summary_files = 0
+    seen_activity_ids: set[int] = set()
     try:
         with zipfile.ZipFile(export_zip) as archive:
-            for name in archive.namelist():
+            for info in archive.infolist():
+                name = validate_zip_member(info)
+                if name.startswith("DI_CONNECT/"):
+                    has_di_connect = True
                 if not name.endswith("_summarizedActivities.json"):
                     continue
-                payload = json.loads(archive.read(name))
+                summary_files += 1
+                payload = json.loads(
+                    bounded_zip_read(
+                        archive,
+                        info,
+                        MAX_SUMMARY_JSON_BYTES,
+                        message="Garmin activity summary JSON is too large.",
+                    )
+                )
+                if not isinstance(payload, list):
+                    raise ParserFailureError("Garmin activity summary JSON has an unexpected shape.")
                 for block in payload:
-                    for row in block.get("summarizedActivitiesExport", []):
+                    if not isinstance(block, dict):
+                        raise ParserFailureError("Garmin activity summary JSON has an unexpected block.")
+                    rows = block.get("summarizedActivitiesExport", [])
+                    if not isinstance(rows, list):
+                        raise ParserFailureError("Garmin activity summary JSON has an unexpected activities list.")
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            raise ParserFailureError("Garmin activity summary row has an unexpected shape.")
                         activity_type = str(row.get("activityType", "")).lower()
                         if activity_type not in RUN_ACTIVITY_TYPES:
                             continue
                         activity_id = row.get("activityId")
                         if activity_id is None:
                             continue
+                        try:
+                            activity_id = int(activity_id)
+                            start_ms = parse_garmin_millis(row.get("startTimeGmt") or row.get("beginTimestamp"))
+                            distance_m = float(row.get("distance") or 0) / 100.0
+                        except (TypeError, ValueError) as error:
+                            raise ParserFailureError("Garmin activity summary contains invalid field types.") from error
+                        if activity_id in seen_activity_ids:
+                            raise ParserFailureError("Garmin activity summary contains duplicate activity IDs.")
+                        seen_activity_ids.add(activity_id)
+                        validate_activity_millis(start_ms, context="Garmin activity")
+                        if distance_m < 0 or distance_m > 1_000_000:
+                            raise ParserFailureError("Garmin activity distance is outside the allowed range.")
                         activities.append(
                             Activity(
-                                activity_id=int(activity_id),
-                                name=row.get("name") or "Run",
+                                activity_id=activity_id,
+                                name=str(row.get("name") or "Run")[:160],
                                 activity_type=activity_type,
-                                start_ms=parse_garmin_millis(
-                                    row.get("startTimeGmt") or row.get("beginTimestamp")
-                                ),
-                                distance_m=float(row.get("distance") or 0) / 100.0,
+                                start_ms=start_ms,
+                                distance_m=distance_m,
                             )
                         )
     except (json.JSONDecodeError, OSError, zipfile.BadZipFile) as error:
         raise ParserFailureError("Could not parse Garmin activity summaries.") from error
+    if not has_di_connect:
+        raise GarminExportNotFoundError("This ZIP does not contain Garmin account export folders.")
+    if summary_files == 0:
+        raise GarminActivityFilesMissingError("Garmin export found, but activity summaries were missing.")
     activities.sort(key=lambda item: item.start_ms)
     return activities
 
@@ -344,14 +531,15 @@ def extract_uploaded_zips(export_zip: Path, raw_dir: Path) -> list[Path]:
     try:
         with zipfile.ZipFile(export_zip) as archive:
             for info in archive.infolist():
-                name = info.filename
+                name = validate_zip_member(info)
                 if not re.search(r"DI_CONNECT/DI-Connect-Uploaded-Files/.*\.zip$", name):
                     continue
-                validate_zip_member(info)
+                if len(extracted) >= MAX_NESTED_ACTIVITY_ZIPS:
+                    raise InvalidZipError("Garmin export contains too many nested activity ZIPs.")
                 target = raw_dir / safe_nested_zip_name(name, len(extracted) + 1)
                 with archive.open(info) as source, target.open("wb") as destination:
                     shutil.copyfileobj(source, destination)
-                validate_zip_file(target)
+                validate_zip_file(target, max_member_bytes=MAX_FIT_FILE_BYTES)
                 extracted.append(target)
     except zipfile.BadZipFile as error:
         raise InvalidZipError("Input is not a valid Garmin export ZIP.") from error
@@ -364,9 +552,18 @@ def list_fit_entries(uploaded_zips: Iterable[Path]) -> list[FitEntry]:
         try:
             with zipfile.ZipFile(zip_path) as archive:
                 for info in archive.infolist():
-                    validate_zip_member(info)
-                    if info.filename.lower().endswith(".fit"):
-                        entries.append(FitEntry(zip_path, info.filename))
+                    name = validate_zip_member(info)
+                    if info.is_dir():
+                        continue
+                    if name.lower().endswith(".zip"):
+                        raise InvalidZipError("Nested ZIPs beyond Garmin activity ZIPs are not allowed.")
+                    if not name.lower().endswith(".fit"):
+                        continue
+                    if info.file_size > MAX_FIT_FILE_BYTES:
+                        raise ZipTooLargeError("FIT file is too large.")
+                    entries.append(FitEntry(zip_path, name))
+                    if len(entries) > MAX_FIT_FILES:
+                        raise InvalidZipError("Garmin export contains too many FIT files.")
         except zipfile.BadZipFile as error:
             raise InvalidZipError(f"Nested Garmin upload is not a valid ZIP: {zip_path.name}") from error
     return entries
@@ -440,7 +637,7 @@ def densest_cluster_bounds(
     for x, y, _ in projected:
         key = (math.floor(x / cell_size), math.floor(y / cell_size))
         counts[key] = counts.get(key, 0) + 1
-    best_cell = max(counts, key=counts.get)
+    best_cell = max(counts, key=lambda key: counts[key])
     selected = [
         (x, y)
         for x, y, _ in projected
@@ -455,11 +652,8 @@ def densest_cluster_bounds(
 
 
 def iso_from_fit_timestamp(timestamp: int | None, fallback_ms: int) -> str:
-    if timestamp is not None:
-        unix_seconds = timestamp + GARMIN_EPOCH
-    else:
-        unix_seconds = fallback_ms / 1000.0
-    return datetime.fromtimestamp(unix_seconds, timezone.utc).isoformat().replace("+00:00", "Z")
+    unix_seconds = timestamp + GARMIN_EPOCH if timestamp is not None else fallback_ms / 1000.0
+    return datetime.fromtimestamp(unix_seconds, UTC).isoformat().replace("+00:00", "Z")
 
 
 def parse_start_date(value: str) -> int:
@@ -468,7 +662,7 @@ def parse_start_date(value: str) -> int:
     except ValueError as error:
         raise argparse.ArgumentTypeError("Use YYYY-MM-DD for --start-date.") from error
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return int(parsed.timestamp())
 
 
@@ -508,7 +702,13 @@ def build_visualization_site(
 
     activities = iter_summarized_activities(export_zip)
     uploaded_zips = extract_uploaded_zips(export_zip, raw_dir)
+    if not uploaded_zips:
+        raise GarminActivityFilesMissingError("Garmin export found, but activity files were missing.")
     fit_entries = list_fit_entries(uploaded_zips)
+    if not fit_entries:
+        raise GarminActivityFilesMissingError("Garmin export found, but FIT activity files were missing.")
+    if not activities:
+        raise NoRunsFoundError("No running GPS activities were found in the Garmin export.")
     match_activity = build_activity_matcher(activities)
 
     projected: list[tuple[float, float, int]] = []
@@ -537,7 +737,15 @@ def build_visualization_site(
                             f"gps_candidates={candidate_gps_files}; matched_runs={parsed_activities}; "
                             f"points={len(projected):,}"
                         )
-                    points = parse_fit_records(archive.read(fit_name))
+                    fit_info = archive.getinfo(fit_name)
+                    points = parse_fit_records(
+                        bounded_zip_read(
+                            archive,
+                            fit_info,
+                            MAX_FIT_FILE_BYTES,
+                            message="FIT file is too large.",
+                        )
+                    )
                     if len(points) < 30:
                         skipped_no_gps += 1
                         continue
@@ -565,8 +773,12 @@ def build_visualization_site(
                     parsed_activities += 1
                     for timestamp, lat, lon in points:
                         x, y = mercator(lon, lat)
-                        unix_seconds = (timestamp + GARMIN_EPOCH) if timestamp is not None else activity.start_ms // 1000
+                        unix_seconds = (
+                            (timestamp + GARMIN_EPOCH) if timestamp is not None else activity.start_ms // 1000
+                        )
                         projected.append((x, y, int(unix_seconds)))
+                    if len(projected) > MAX_PARSED_POINTS_BEFORE_DOWNSAMPLING:
+                        raise ParserFailureError("Too many parsed GPS points before downsampling.")
                     activity_start_times.append(
                         int((points[0][0] + GARMIN_EPOCH) if points[0][0] is not None else activity.start_ms // 1000)
                     )
@@ -646,7 +858,7 @@ def build_visualization_site(
     copy_template_assets(template_dir, output_dir)
     (output_dir / "points.bin").write_bytes(triples)
     meta = {
-        "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generatedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "slug": slug,
         "displayName": display_name,
         "viewerTitle": f"{display_name}'s Running Footprints" if display_name else "Running Footprints",
@@ -666,8 +878,8 @@ def build_visualization_site(
         "maxPoints": max_points,
         "sampled": sampled,
         "requestedStartDate": start_date,
-        "start": datetime.fromtimestamp(min_t, timezone.utc).isoformat().replace("+00:00", "Z"),
-        "end": datetime.fromtimestamp(max_t, timezone.utc).isoformat().replace("+00:00", "Z"),
+        "start": datetime.fromtimestamp(min_t, UTC).isoformat().replace("+00:00", "Z"),
+        "end": datetime.fromtimestamp(max_t, UTC).isoformat().replace("+00:00", "Z"),
         "bounds": {
             "minMercatorX": min_x,
             "maxMercatorX": max_x,

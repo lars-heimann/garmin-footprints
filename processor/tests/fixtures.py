@@ -14,7 +14,7 @@ def semicircles(degrees: float) -> int:
     return int(degrees * (2**31) / 180.0)
 
 
-def make_fit(points: int = 80, start_timestamp: int = 4102444800 - GARMIN_EPOCH) -> bytes:
+def make_fit(points: int = 80, start_timestamp: int = 1710000000 - GARMIN_EPOCH) -> bytes:
     data = bytearray()
     data.extend(b"\x40")
     data.extend(b"\x00")
@@ -26,11 +26,11 @@ def make_fit(points: int = 80, start_timestamp: int = 4102444800 - GARMIN_EPOCH)
     data.extend(bytes([1, 4, 0x85]))
 
     for index in range(points):
-      data.extend(b"\x00")
-      timestamp = start_timestamp + index * 10
-      lat = 52.50 + math.sin(index / 10) * 0.01
-      lon = 13.40 + index * 0.0002
-      data.extend(struct.pack("<Iii", timestamp, semicircles(lat), semicircles(lon)))
+        data.extend(b"\x00")
+        timestamp = start_timestamp + index * 10
+        lat = 52.50 + math.sin(index / 10) * 0.01
+        lon = 13.40 + index * 0.0002
+        data.extend(struct.pack("<Iii", timestamp, semicircles(lat), semicircles(lon)))
 
     header = bytearray(14)
     header[0] = 14
@@ -42,7 +42,7 @@ def make_fit(points: int = 80, start_timestamp: int = 4102444800 - GARMIN_EPOCH)
 
 
 def create_sample_garmin_export(path: Path, *, activity_type: str = "running", include_fit: bool = True) -> None:
-    start_unix = 4102444800
+    start_unix = 1710000000
     nested = path.with_suffix(".activities.zip")
     with zipfile.ZipFile(nested, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         if include_fit:

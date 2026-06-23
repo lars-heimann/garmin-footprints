@@ -7,10 +7,12 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 try:
@@ -21,6 +23,7 @@ except ModuleNotFoundError:
 
 
 ASSET_NAMES = {"index.html", "app.js", "styles.css", "meta.json", "points.bin"}
+JOB_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
 def processor_request(
@@ -51,13 +54,15 @@ def processor_json(api_base: str, token: str, method: str, path: str, payload: d
 
 
 def download_upload(api_base: str, token: str, job_id: str, target: Path) -> None:
-    with processor_request(api_base, token, "GET", f"/api/processor/jobs/{job_id}/download") as response:
-        with target.open("wb") as file:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                file.write(chunk)
+    with (
+        processor_request(api_base, token, "GET", f"/api/processor/jobs/{job_id}/download") as response,
+        target.open("wb") as file,
+    ):
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            file.write(chunk)
 
 
 def upload_assets(api_base: str, token: str, job_id: str, output_dir: Path) -> None:
@@ -92,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if not args.api_base or not args.processor_token:
         print("WORKER_API_BASE and PROCESSOR_TOKEN are required.", file=sys.stderr)
+        return 2
+    if not JOB_ID_RE.fullmatch(args.job_id):
+        print("job id must be a UUID.", file=sys.stderr)
         return 2
 
     with tempfile.TemporaryDirectory(prefix="garmin-job-", dir=args.work_dir) as temp_root:
@@ -137,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"jobId": args.job_id, "status": "failed", "errorCode": error.code}), file=sys.stderr)
             return int(error.exit_code)
         except Exception as error:
-            try:
+            with suppress(Exception):
                 processor_json(
                     args.api_base,
                     args.processor_token,
@@ -145,8 +153,6 @@ def main(argv: list[str] | None = None) -> int:
                     f"{status_path}/complete",
                     {"status": "failed", "errorCode": "INTERNAL_ERROR", "errorMessage": str(error)},
                 )
-            except Exception:
-                pass
             print(json.dumps({"jobId": args.job_id, "status": "failed", "errorMessage": str(error)}), file=sys.stderr)
             return 1
 
