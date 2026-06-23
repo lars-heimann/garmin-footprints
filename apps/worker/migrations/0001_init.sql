@@ -30,3 +30,5 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS jobs_slug_idx ON jobs (slug);
 CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs (status);
+CREATE INDEX IF NOT EXISTS jobs_status_updated_at_idx ON jobs (status, updated_at);
+CREATE INDEX IF NOT EXISTS jobs_raw_upload_cleanup_idx ON jobs (raw_upload_deleted_at, status);

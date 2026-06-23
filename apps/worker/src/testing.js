@@ -47,6 +47,19 @@ export class MemoryStore {
     if (!job) return;
     Object.assign(job, patch);
   }
+
+  async listReapableJobs({ reservedCutoff, queuedCutoff, processingCutoff }) {
+    return Array.from(this.jobs.values())
+      .filter((job) => {
+        if (job.status === "reserved" && job.updatedAt < reservedCutoff) return true;
+        if (job.status === "queued" && job.updatedAt < queuedCutoff) return true;
+        if (job.status === "processing" && job.updatedAt < processingCutoff) return true;
+        return Boolean(job.uploadKey && !job.rawUploadDeletedAt && ["ready", "failed", "expired"].includes(job.status));
+      })
+      .sort((left, right) => String(left.updatedAt).localeCompare(String(right.updatedAt)))
+      .slice(0, 100)
+      .map((job) => ({ ...job }));
+  }
 }
 
 export class MemoryBucket {

@@ -1,12 +1,33 @@
-const RESERVED_SLUGS = new Set(["www", "api", "admin", "static", "assets", "login", "support"]);
+const RESERVED_SLUGS = new Set([
+  "www",
+  "api",
+  "admin",
+  "static",
+  "assets",
+  "login",
+  "support",
+  "guide",
+  "garmin",
+  "connect",
+  "processor",
+  "uploads",
+  "jobs",
+]);
 const ALLOWED_ASSETS = new Set(["index.html", "app.js", "styles.css", "meta.json", "points.bin"]);
 const DEFAULT_MAX_ZIP_BYTES = 500 * 1024 * 1024;
 const DEFAULT_START_DATE = "2022-05-01";
 const DEFAULT_MAX_POINTS = 900_000;
+const DEFAULT_PUBLIC_HOST_SUFFIX = "runmaps.larsheimann.com";
+const RESERVED_JOB_TTL_MS = 60 * 60 * 1000;
+const QUEUED_JOB_TTL_MS = 30 * 60 * 1000;
+const PROCESSING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request, env, ctx);
+  },
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(reapStaleJobs(env));
   },
 };
 
@@ -30,7 +51,12 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
 
     if (env.ASSETS?.fetch) {
-      return env.ASSETS.fetch(request);
+      if (url.pathname === "/guide/garmin-export") {
+        const assetUrl = new URL(request.url);
+        assetUrl.pathname = "/guide/garmin-export.html";
+        return withSecurityHeaders(await env.ASSETS.fetch(new Request(assetUrl.toString(), request)));
+      }
+      return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
     return htmlResponse("Garmin Footprints API");
   } catch (error) {
@@ -40,6 +66,14 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
 }
 
 async function handleApiRoute(request, env, ctx, url) {
+  if (request.method === "GET" && url.pathname === "/api/config") {
+    return jsonResponse({
+      turnstileSiteKey: env.TURNSTILE_SITE_KEY || null,
+      maxZipBytes: maxZipBytes(env),
+      publicHostSuffix: env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX,
+    });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/upload-sessions") {
     return createUploadSession(request, env);
   }
@@ -62,12 +96,19 @@ async function handleProcessorRoute(request, env, url) {
     return errorResponse("UNAUTHORIZED", "Processor token is missing or invalid.", 401);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/processor/reap") {
+    return jsonResponse(await reapStaleJobs(env));
+  }
+
   const match = url.pathname.match(/^\/api\/processor\/jobs\/([^/]+)(?:\/(.*))?$/);
   if (!match) {
     return errorResponse("NOT_FOUND", "Processor route not found.", 404);
   }
 
   const jobId = match[1];
+  if (!isValidJobId(jobId)) {
+    return errorResponse("INVALID_JOB_ID", "Job ID is invalid.", 400);
+  }
   const action = match[2] || "";
   const store = getStore(env);
   const job = await store.getJob(jobId);
@@ -108,9 +149,33 @@ async function handleProcessorRoute(request, env, url) {
     if (!ALLOWED_ASSETS.has(assetName)) {
       return errorResponse("INVALID_ASSET", "Asset name is not allowed.", 400);
     }
-    await getBucket(env).put(`sites/${job.slug}/${assetName}`, request.body, {
-      httpMetadata: { contentType: contentTypeForPath(assetName) },
-    });
+    const contentLength = Number(request.headers.get("Content-Length") || "");
+    if (!Number.isFinite(contentLength) || contentLength <= 0) {
+      return errorResponse("LENGTH_REQUIRED", "Content-Length is required.", 411);
+    }
+    if (contentLength > maxAssetBytes(assetName)) {
+      return errorResponse("ASSET_TOO_LARGE", "Generated asset is larger than allowed.", 413);
+    }
+    if (!request.body) {
+      return errorResponse("EMPTY_UPLOAD", "Asset body is required.", 400);
+    }
+    try {
+      await getBucket(env).put(
+        `sites/${job.slug}/${assetName}`,
+        limitStreamBytes(request.body, maxAssetBytes(assetName), "ASSET_TOO_LARGE"),
+        {
+          httpMetadata: { contentType: contentTypeForPath(assetName) },
+        }
+      );
+    } catch (error) {
+      if (isStreamLimitError(error, "ASSET_TOO_LARGE")) {
+        await getBucket(env)
+          .delete(`sites/${job.slug}/${assetName}`)
+          .catch(() => {});
+        return errorResponse("ASSET_TOO_LARGE", "Generated asset is larger than allowed.", 413);
+      }
+      throw error;
+    }
     return jsonResponse({ ok: true });
   }
 
@@ -137,6 +202,10 @@ async function createUploadSession(request, env) {
   if (!inviteCode) {
     return errorResponse("INVALID_INVITE", "Invite code is required.", 400);
   }
+  const turnstile = await verifyTurnstile(request, env, payload.turnstileToken);
+  if (!turnstile.ok) {
+    return errorResponse(turnstile.code, turnstile.message, turnstile.status);
+  }
 
   const store = getStore(env);
   const now = new Date().toISOString();
@@ -162,7 +231,11 @@ async function createUploadSession(request, env) {
   const startDate = cleanStartDate(payload.startDate || env.DEFAULT_START_DATE || DEFAULT_START_DATE);
   const maxPoints = cleanMaxPoints(payload.maxPoints || env.DEFAULT_MAX_POINTS || DEFAULT_MAX_POINTS);
   const siteUrl = siteUrlForSlug(slug, env);
-  const uploadToken = await signUploadToken(env, { jobId, exp: Date.now() + 60 * 60 * 1000 });
+  const uploadToken = await signUploadToken(env, {
+    jobId,
+    jti: crypto.randomUUID(),
+    exp: Date.now() + 60 * 60 * 1000,
+  });
   const uploadUrl = new URL(`/api/uploads/${jobId}`, request.url);
   uploadUrl.searchParams.set("token", uploadToken);
 
@@ -194,6 +267,9 @@ async function createUploadSession(request, env) {
 }
 
 async function receiveUpload(request, env, ctx, jobId, token) {
+  if (!isValidJobId(jobId)) {
+    return errorResponse("INVALID_JOB_ID", "Job ID is invalid.", 400);
+  }
   if (!token) {
     return errorResponse("MISSING_UPLOAD_TOKEN", "Upload token is required.", 401);
   }
@@ -222,9 +298,19 @@ async function receiveUpload(request, env, ctx, jobId, token) {
     return errorResponse("INVALID_STATUS", "Job is not waiting for upload.", 409);
   }
 
-  await getBucket(env).put(job.uploadKey, request.body, {
-    httpMetadata: { contentType: "application/zip" },
-  });
+  try {
+    await getBucket(env).put(job.uploadKey, limitStreamBytes(request.body, maxZipBytes(env), "ZIP_TOO_LARGE"), {
+      httpMetadata: { contentType: "application/zip" },
+    });
+  } catch (error) {
+    if (isStreamLimitError(error, "ZIP_TOO_LARGE")) {
+      await getBucket(env)
+        .delete(job.uploadKey)
+        .catch(() => {});
+      return errorResponse("ZIP_TOO_LARGE", "ZIP is larger than the configured limit.", 413);
+    }
+    throw error;
+  }
   const now = new Date().toISOString();
   await store.updateJob(jobId, { status: "queued", updatedAt: now });
 
@@ -261,8 +347,19 @@ async function completeJob(env, job, payload) {
   const now = new Date().toISOString();
   let rawUploadDeletedAt = job.rawUploadDeletedAt;
   if (job.uploadKey && !rawUploadDeletedAt) {
-    await getBucket(env).delete(job.uploadKey);
-    rawUploadDeletedAt = now;
+    try {
+      await getBucket(env).delete(job.uploadKey);
+      rawUploadDeletedAt = now;
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "raw upload deletion failed",
+          jobId: job.jobId,
+          detail: String(error),
+        })
+      );
+    }
   }
 
   const patch =
@@ -345,7 +442,8 @@ class D1Store {
   }
 
   async getInviteByHash(hash) {
-    return this.db.prepare("SELECT code_hash AS codeHash, max_uses AS maxUses, uses FROM invites WHERE code_hash = ?")
+    return this.db
+      .prepare("SELECT code_hash AS codeHash, max_uses AS maxUses, uses FROM invites WHERE code_hash = ?")
       .bind(hash)
       .first();
   }
@@ -364,7 +462,10 @@ class D1Store {
 
   async reserveSlug(slug, jobId, createdAt) {
     try {
-      await this.db.prepare("INSERT INTO slugs (slug, job_id, created_at) VALUES (?, ?, ?)").bind(slug, jobId, createdAt).run();
+      await this.db
+        .prepare("INSERT INTO slugs (slug, job_id, created_at) VALUES (?, ?, ?)")
+        .bind(slug, jobId, createdAt)
+        .run();
       return true;
     } catch (error) {
       if (String(error).toLowerCase().includes("unique")) {
@@ -431,7 +532,34 @@ class D1Store {
     if (!entries.length) return;
     const assignments = entries.map(([key]) => `${columns[key]} = ?`).join(", ");
     const values = entries.map(([, value]) => value);
-    await this.db.prepare(`UPDATE jobs SET ${assignments} WHERE job_id = ?`).bind(...values, jobId).run();
+    await this.db
+      .prepare(`UPDATE jobs SET ${assignments} WHERE job_id = ?`)
+      .bind(...values, jobId)
+      .run();
+  }
+
+  async listReapableJobs(cutoffs) {
+    const { reservedCutoff, queuedCutoff, processingCutoff } = cutoffs;
+    const rows = await this.db
+      .prepare(
+        `SELECT
+          job_id AS jobId, slug, display_name AS displayName, status,
+          invite_code_hash AS inviteCodeHash, created_at AS createdAt, updated_at AS updatedAt,
+          upload_key AS uploadKey, error_code AS errorCode, error_message AS errorMessage,
+          site_url AS siteUrl, raw_upload_deleted_at AS rawUploadDeletedAt,
+          start_date AS startDate, max_points AS maxPoints
+        FROM jobs
+        WHERE
+          (status = 'reserved' AND updated_at < ?)
+          OR (status = 'queued' AND updated_at < ?)
+          OR (status = 'processing' AND updated_at < ?)
+          OR (upload_key IS NOT NULL AND raw_upload_deleted_at IS NULL AND status IN ('ready', 'failed', 'expired'))
+        ORDER BY updated_at ASC
+        LIMIT 100`
+      )
+      .bind(reservedCutoff, queuedCutoff, processingCutoff)
+      .all();
+    return rows.results || [];
   }
 }
 
@@ -448,11 +576,16 @@ function getBucket(env) {
 }
 
 function normalizeInviteCode(value) {
-  return String(value || "").trim().replace(/\s+/g, "").toUpperCase();
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toUpperCase();
 }
 
 function normalizeSlug(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function isValidSlug(slug) {
@@ -460,7 +593,9 @@ function isValidSlug(slug) {
 }
 
 function cleanDisplayName(value) {
-  return String(value || "").trim().slice(0, 80);
+  return String(value || "")
+    .trim()
+    .slice(0, 80);
 }
 
 function cleanStartDate(value) {
@@ -474,33 +609,209 @@ function cleanMaxPoints(value) {
   return Math.max(1_000, Math.min(2_000_000, Math.floor(parsed)));
 }
 
+function isValidJobId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
 function maxZipBytes(env) {
   const configured = Number(env.MAX_ZIP_BYTES || DEFAULT_MAX_ZIP_BYTES);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_ZIP_BYTES;
 }
 
+function maxAssetBytes(assetName) {
+  if (assetName === "points.bin") return 32 * 1024 * 1024;
+  if (assetName === "meta.json") return 1024 * 1024;
+  return 512 * 1024;
+}
+
 function inviteSecret(env) {
-  return env.INVITE_HASH_SECRET || env.UPLOAD_TOKEN_SECRET || "local-invite-secret";
+  return requiredSecret(env, "INVITE_HASH_SECRET", "local-invite-secret");
 }
 
 function uploadSecret(env) {
-  return env.UPLOAD_TOKEN_SECRET || env.PROCESSOR_TOKEN || "local-upload-secret";
+  return requiredSecret(env, "UPLOAD_TOKEN_SECRET", "local-upload-secret");
+}
+
+function requiredSecret(env, name, localFallback) {
+  if (env[name]) {
+    return env[name];
+  }
+  if (env.__TEST_STORE || env.__ALLOW_INSECURE_LOCAL_SECRETS) {
+    return localFallback;
+  }
+  throw new Error(`${name} secret is required.`);
+}
+
+function limitStreamBytes(stream, maxBytes, errorCode) {
+  let seen = 0;
+  return stream.pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        seen += chunkByteLength(chunk);
+        if (seen > maxBytes) {
+          controller.error(new Error(errorCode));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    })
+  );
+}
+
+function chunkByteLength(chunk) {
+  if (chunk instanceof Uint8Array) {
+    return chunk.byteLength;
+  }
+  if (typeof chunk === "string") {
+    return new TextEncoder().encode(chunk).byteLength;
+  }
+  if (chunk?.byteLength) {
+    return Number(chunk.byteLength);
+  }
+  return 0;
+}
+
+function isStreamLimitError(error, code) {
+  return error instanceof Error && error.message === code;
 }
 
 function siteUrlForSlug(slug, env) {
   if (env.PUBLIC_SITE_URL_PATTERN) {
     return String(env.PUBLIC_SITE_URL_PATTERN).replaceAll("{slug}", slug);
   }
-  return `https://${slug}.${env.PUBLIC_HOST_SUFFIX || "runs.example.com"}`;
+  return `https://${slug}.${env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX}`;
 }
 
-function slugFromHost(hostHeader, suffix = "runs.example.com") {
+function slugFromHost(hostHeader, suffix = DEFAULT_PUBLIC_HOST_SUFFIX) {
   const host = hostHeader.split(":")[0].toLowerCase();
-  const normalizedSuffix = String(suffix || "runs.example.com").toLowerCase();
+  const normalizedSuffix = String(suffix || DEFAULT_PUBLIC_HOST_SUFFIX).toLowerCase();
   if (!host.endsWith(`.${normalizedSuffix}`)) return null;
   const slug = host.slice(0, -normalizedSuffix.length - 1);
   if (slug.includes(".") || !isValidSlug(slug)) return null;
   return slug;
+}
+
+async function verifyTurnstile(request, env, token) {
+  if (!env.TURNSTILE_SECRET_KEY) {
+    return { ok: true };
+  }
+  if (env.__TEST_TURNSTILE_RESULT) {
+    return env.__TEST_TURNSTILE_RESULT.ok
+      ? { ok: true }
+      : {
+          ok: false,
+          code: "TURNSTILE_FAILED",
+          message: "Browser check failed.",
+          status: 403,
+        };
+  }
+  const responseToken = String(token || "").trim();
+  if (!responseToken) {
+    return {
+      ok: false,
+      code: "TURNSTILE_REQUIRED",
+      message: "Browser check is required.",
+      status: 400,
+    };
+  }
+  const form = new FormData();
+  form.set("secret", env.TURNSTILE_SECRET_KEY);
+  form.set("response", responseToken);
+  const remoteIp = request.headers.get("CF-Connecting-IP");
+  if (remoteIp) {
+    form.set("remoteip", remoteIp);
+  }
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    return {
+      ok: false,
+      code: "TURNSTILE_UNAVAILABLE",
+      message: "Browser check could not be verified.",
+      status: 503,
+    };
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!result.success) {
+    return {
+      ok: false,
+      code: "TURNSTILE_FAILED",
+      message: "Browser check failed.",
+      status: 403,
+    };
+  }
+  return { ok: true };
+}
+
+export async function reapStaleJobs(env, nowMs = Date.now()) {
+  const now = new Date(nowMs).toISOString();
+  const cutoffs = {
+    reservedCutoff: new Date(nowMs - RESERVED_JOB_TTL_MS).toISOString(),
+    queuedCutoff: new Date(nowMs - QUEUED_JOB_TTL_MS).toISOString(),
+    processingCutoff: new Date(nowMs - PROCESSING_JOB_TTL_MS).toISOString(),
+  };
+  const store = getStore(env);
+  const bucket = getBucket(env);
+  const jobs = await store.listReapableJobs(cutoffs);
+  const result = { checked: jobs.length, expired: 0, failed: 0, deletedUploads: 0, deletionFailures: 0 };
+
+  for (const job of jobs) {
+    let nextStatus = job.status;
+    const patch = { updatedAt: now };
+    if (job.status === "reserved" && job.updatedAt < cutoffs.reservedCutoff) {
+      nextStatus = "expired";
+      Object.assign(patch, {
+        status: nextStatus,
+        errorCode: "UPLOAD_SESSION_EXPIRED",
+        errorMessage: "Upload session expired before a ZIP was received.",
+      });
+      result.expired += 1;
+    } else if (job.status === "queued" && job.updatedAt < cutoffs.queuedCutoff) {
+      nextStatus = "failed";
+      Object.assign(patch, {
+        status: nextStatus,
+        errorCode: "PROCESSOR_DISPATCH_TIMEOUT",
+        errorMessage: "Processing did not start in time.",
+      });
+      result.failed += 1;
+    } else if (job.status === "processing" && job.updatedAt < cutoffs.processingCutoff) {
+      nextStatus = "failed";
+      Object.assign(patch, {
+        status: nextStatus,
+        errorCode: "PROCESSOR_TIMEOUT",
+        errorMessage: "Processing took too long and was stopped.",
+      });
+      result.failed += 1;
+    }
+
+    let rawUploadDeletedAt = job.rawUploadDeletedAt;
+    if (job.uploadKey && !rawUploadDeletedAt && ["ready", "failed", "expired"].includes(nextStatus)) {
+      try {
+        await bucket.delete(job.uploadKey);
+        rawUploadDeletedAt = now;
+        patch.rawUploadDeletedAt = rawUploadDeletedAt;
+        result.deletedUploads += 1;
+      } catch (error) {
+        result.deletionFailures += 1;
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "reaper raw deletion failed",
+            jobId: job.jobId,
+            detail: String(error),
+          })
+        );
+      }
+    }
+
+    if (Object.keys(patch).length > 1) {
+      await store.updateJob(job.jobId, patch);
+    }
+  }
+
+  return result;
 }
 
 export async function hashInviteCode(inviteCode, secret) {
@@ -557,17 +868,10 @@ async function isProcessorAuthorized(request, env) {
 }
 
 function constantTimeEqual(left, right) {
-  if (left.length !== right.length) {
-    let mismatch = left.length ^ right.length;
-    const length = Math.max(left.length, right.length);
-    for (let index = 0; index < length; index += 1) {
-      mismatch |= (left[index] || 0) ^ (right[index] || 0);
-    }
-    return false;
-  }
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left[index] ^ right[index];
+  const length = Math.max(left.length, right.length);
+  let mismatch = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    mismatch |= (left[index] || 0) ^ (right[index] || 0);
   }
   return mismatch === 0;
 }
@@ -581,7 +885,10 @@ function bytesToBase64url(bytes) {
 }
 
 function base64urlToBytes(value) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const padded = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
@@ -591,16 +898,20 @@ function base64urlToBytes(value) {
 }
 
 function jsonResponse(payload, status = 200) {
+  const headers = securityHeaders();
+  headers.set("Content-Type", "application/json; charset=utf-8");
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
+    headers,
   });
 }
 
 function htmlResponse(text, status = 200) {
+  const headers = securityHeaders();
+  headers.set("Content-Type", "text/html; charset=utf-8");
   return new Response(`<!doctype html><title>Garmin Footprints</title><p>${escapeHtml(text)}</p>`, {
     status,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+    headers,
   });
 }
 
@@ -616,6 +927,16 @@ function withCors(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of securityHeaders()) {
+    if (!headers.has(key)) {
+      headers.set(key, value);
+    }
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -625,7 +946,7 @@ function corsHeaders() {
 }
 
 function objectResponse(object, fallbackContentType) {
-  const headers = new Headers();
+  const headers = securityHeaders();
   if (typeof object.writeHttpMetadata === "function") {
     object.writeHttpMetadata(headers);
   }
@@ -633,6 +954,16 @@ function objectResponse(object, fallbackContentType) {
     headers.set("Content-Type", fallbackContentType);
   }
   return new Response(object.body, { headers });
+}
+
+function securityHeaders() {
+  return new Headers({
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Content-Security-Policy":
+      "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  });
 }
 
 function contentTypeForPath(path) {

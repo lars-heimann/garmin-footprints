@@ -3,31 +3,36 @@
   "main": "src/index.js",
   "compatibility_date": "2026-06-23",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
   "assets": {
     "directory": "../web",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
   },
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0.1
+    "head_sampling_rate": 0.1,
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"],
   },
   "r2_buckets": [
     {
       "binding": "SITE_BUCKET",
-      "bucket_name": "garmin-footprints"
-    }
+      "bucket_name": "runmaps-app",
+    },
   ],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "garmin-footprints",
-      "database_id": "replace-with-your-d1-database-id"
-    }
+      "database_name": "runmaps",
+      "database_id": "replace-with-your-d1-database-id",
+    },
   ],
   "vars": {
-    "PUBLIC_HOST_SUFFIX": "runs.example.com",
+    "PUBLIC_HOST_SUFFIX": "runmaps.larsheimann.com",
+    "PUBLIC_SITE_URL_PATTERN": "https://{slug}.runmaps.larsheimann.com",
     "MAX_ZIP_BYTES": "524288000",
     "DEFAULT_START_DATE": "2022-05-01",
-    "DEFAULT_MAX_POINTS": "900000"
-  }
+    "DEFAULT_MAX_POINTS": "900000",
+  },
 }
