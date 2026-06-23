@@ -48,7 +48,7 @@ async function startServer(env) {
   const pending = [];
   const server = createServer(async (incoming, outgoing) => {
     try {
-      const effectiveHost = incoming.headers["x-test-host"] || incoming.headers.host;
+      const effectiveHost = String(incoming.headers["x-test-host"] || incoming.headers.host || "127.0.0.1");
       const url = `http://${effectiveHost}${incoming.url}`;
       const headers = new Headers();
       for (const [key, value] of Object.entries(incoming.headers)) {
@@ -59,12 +59,16 @@ async function startServer(env) {
         }
       }
       headers.set("Host", effectiveHost);
-      const request = new Request(url, {
-        method: incoming.method,
-        headers,
-        body: incoming.method === "GET" || incoming.method === "HEAD" ? undefined : incoming,
-        duplex: incoming.method === "GET" || incoming.method === "HEAD" ? undefined : "half",
-      });
+      const hasBody = incoming.method !== "GET" && incoming.method !== "HEAD";
+      const request = new Request(
+        url,
+        /** @type {RequestInit & { duplex?: "half" }} */ ({
+          method: incoming.method,
+          headers,
+          body: hasBody ? /** @type {any} */ (incoming) : undefined,
+          duplex: hasBody ? "half" : undefined,
+        })
+      );
       const response = await worker.fetch(request, env, {
         waitUntil(promise) {
           pending.push(promise);
@@ -72,7 +76,7 @@ async function startServer(env) {
       });
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       if (response.body) {
-        Readable.fromWeb(response.body).pipe(outgoing);
+        Readable.fromWeb(/** @type {any} */ (response.body)).pipe(outgoing);
       } else {
         outgoing.end();
       }
@@ -81,8 +85,12 @@ async function startServer(env) {
       outgoing.end(String(error?.stack || error));
     }
   });
-  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
-  const { port } = server.address();
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", () => resolveListen(undefined)));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Local e2e server did not expose a TCP port.");
+  }
+  const { port } = address;
   return {
     port,
     url: `http://127.0.0.1:${port}`,
@@ -119,7 +127,10 @@ function run(command, args, options = {}) {
           // Fall through to the timeout error.
         }
       }
-      finish(rejectRun, new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs}ms\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`));
+      finish(
+        rejectRun,
+        new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs}ms\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`)
+      );
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
@@ -135,7 +146,10 @@ function run(command, args, options = {}) {
       if (code === 0) {
         finish(resolveRun, { stdout, stderr });
       } else {
-        finish(rejectRun, new Error(`${command} ${args.join(" ")} exited ${code}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`));
+        finish(
+          rejectRun,
+          new Error(`${command} ${args.join(" ")} exited ${code}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`)
+        );
       }
     });
   });
@@ -143,8 +157,16 @@ function run(command, args, options = {}) {
 
 function chromePath() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (existsSync(macChrome)) return macChrome;
+  const candidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
   return null;
 }
 
@@ -154,23 +176,27 @@ async function chromeSmoke(basePort, workDir, viewport) {
     throw new Error("Chrome was not found for browser smoke tests. Set CHROME_PATH.");
   }
   const screenshot = join(workDir, `site-${viewport.width}x${viewport.height}.png`);
-  await run(chrome, [
-    "--headless=new",
-    "--disable-gpu",
-    "--disable-background-networking",
-    "--disable-background-timer-throttling",
-    "--disable-renderer-backgrounding",
-    "--disable-extensions",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--timeout=10000",
-    `--user-data-dir=${join(workDir, `chrome-${viewport.width}`)}`,
-    `--host-resolver-rules=MAP runner.runs.example.com 127.0.0.1`,
-    `--window-size=${viewport.width},${viewport.height}`,
-    "--virtual-time-budget=3000",
-    `--screenshot=${screenshot}`,
-    `http://runner.runs.example.com:${basePort}/`,
-  ], { timeoutMs: 15000, allowTimeoutFile: screenshot });
+  await run(
+    chrome,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-extensions",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--timeout=10000",
+      `--user-data-dir=${join(workDir, `chrome-${viewport.width}`)}`,
+      `--host-resolver-rules=MAP runner.runs.example.com 127.0.0.1`,
+      `--window-size=${viewport.width},${viewport.height}`,
+      "--virtual-time-budget=3000",
+      `--screenshot=${screenshot}`,
+      `http://runner.runs.example.com:${basePort}/`,
+    ],
+    { timeoutMs: 15000, allowTimeoutFile: screenshot }
+  );
   const info = await stat(screenshot);
   assert.ok(info.size > 1000, `expected non-empty screenshot for ${viewport.width}x${viewport.height}`);
 }

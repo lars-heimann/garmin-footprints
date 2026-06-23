@@ -1,0 +1,11 @@
+node_modules
+.wrangler
+.mypy_cache
+.ruff_cache
+.terraform
+infra/**/.terraform
+coverage
+processor/**/__pycache__
+*.pyc
+Implementation plan.md
+RUNNING_DATA_VISUALIZATION_PLAN.md

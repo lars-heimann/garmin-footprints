@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: repo-quality
+        name: repo quality checks
+        entry: npm run quality
+        language: system
+        pass_filenames: false

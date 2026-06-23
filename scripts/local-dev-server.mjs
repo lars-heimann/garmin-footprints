@@ -96,18 +96,21 @@ function requestToWorkerRequest(incoming, effectiveHost) {
   }
   headers.set("Host", effectiveHost);
   const hasBody = incoming.method !== "GET" && incoming.method !== "HEAD";
-  return new Request(url, {
-    method: incoming.method,
-    headers,
-    body: hasBody ? incoming : undefined,
-    duplex: hasBody ? "half" : undefined,
-  });
+  return new Request(
+    url,
+    /** @type {RequestInit & { duplex?: "half" }} */ ({
+      method: incoming.method,
+      headers,
+      body: hasBody ? incoming : undefined,
+      duplex: hasBody ? "half" : undefined,
+    })
+  );
 }
 
 async function writeResponse(outgoing, response) {
   outgoing.writeHead(response.status, Object.fromEntries(response.headers));
   if (response.body) {
-    Readable.fromWeb(response.body).pipe(outgoing);
+    Readable.fromWeb(/** @type {any} */ (response.body)).pipe(outgoing);
   } else {
     outgoing.end();
   }
@@ -162,12 +165,26 @@ async function main() {
     }
   });
 
-  server.listen(port, "127.0.0.1", () => {
-    console.log("Garmin Footprints local server");
-    console.log(`Upload app:  http://127.0.0.1:${port}/`);
-    console.log(`Invite code: ${LOCAL_INVITE_CODE}`);
-    console.log(`Share URLs:  http://{slug}.runs.localhost:${port}/`);
-    console.log("Uploads are processed automatically in this local dev server.");
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", rejectListen);
+      resolveListen(undefined);
+    });
+  });
+
+  console.log("Garmin Footprints local server");
+  console.log(`Upload app:  http://127.0.0.1:${port}/`);
+  console.log(`Invite code: ${LOCAL_INVITE_CODE}`);
+  console.log(`Share URLs:  http://{slug}.runs.localhost:${port}/`);
+  console.log("Uploads are processed automatically in this local dev server.");
+
+  await new Promise((resolveShutdown) => {
+    const shutdown = () => {
+      server.close(() => resolveShutdown(undefined));
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
   });
 }
 

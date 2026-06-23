@@ -5,9 +5,25 @@
   "type": "module",
   "scripts": {
     "dev:local": "node scripts/local-dev-server.mjs",
+    "quality": "npm run format:check && npm run lint && npm run typecheck",
+    "format": "prettier --write . && python3 -m ruff format processor scripts",
+    "format:check": "prettier --check . && python3 -m ruff format --check processor scripts",
+    "lint": "eslint . && python3 -m ruff check processor scripts",
+    "typecheck": "tsc --noEmit && python3 -m mypy processor scripts",
+    "deploy:worker": "wrangler deploy --config apps/worker/wrangler.jsonc",
+    "db:migrate:prod": "wrangler d1 migrations apply runmaps --config apps/worker/wrangler.jsonc --remote",
     "test": "npm run test:worker && npm run test:processor && npm run test:e2e",
     "test:worker": "node --test apps/worker/test/*.test.mjs",
     "test:processor": "python3 -m unittest discover -s processor/tests -p 'test_*.py'",
     "test:e2e": "node tests/e2e/local-flow.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.7",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.26.0"
   }
 }

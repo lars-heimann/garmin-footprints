@@ -1,16 +1,30 @@
-const canvas = document.getElementById("scene");
-const errorBox = document.getElementById("error");
-const mapTitleEl = document.getElementById("mapTitle");
-const aboutMapEl = document.getElementById("aboutMap");
-const pointCountEl = document.getElementById("pointCount");
-const runCountEl = document.getElementById("runCount");
-const dateRangeEl = document.getElementById("dateRange");
-const currentDateEl = document.getElementById("currentDate");
-const meterFill = document.getElementById("meterFill");
-const playPause = document.getElementById("playPause");
-const replay = document.getElementById("replay");
-const resetView = document.getElementById("resetView");
-const timeSlider = document.getElementById("timeSlider");
+/**
+ * @template {HTMLElement} T
+ * @param {string} id
+ * @param {new (...args: never[]) => T} type
+ * @returns {T}
+ */
+function mustElement(id, type) {
+  const element = document.getElementById(id);
+  if (!(element instanceof type)) {
+    throw new Error(`Missing #${id}`);
+  }
+  return element;
+}
+
+const canvas = mustElement("scene", HTMLCanvasElement);
+const errorBox = mustElement("error", HTMLParagraphElement);
+const mapTitleEl = mustElement("mapTitle", HTMLHeadingElement);
+const aboutMapEl = mustElement("aboutMap", HTMLParagraphElement);
+const pointCountEl = mustElement("pointCount", HTMLElement);
+const runCountEl = mustElement("runCount", HTMLElement);
+const dateRangeEl = mustElement("dateRange", HTMLElement);
+const currentDateEl = mustElement("currentDate", HTMLParagraphElement);
+const meterFill = mustElement("meterFill", HTMLSpanElement);
+const playPause = mustElement("playPause", HTMLButtonElement);
+const replay = mustElement("replay", HTMLButtonElement);
+const resetView = mustElement("resetView", HTMLButtonElement);
+const timeSlider = mustElement("timeSlider", HTMLInputElement);
 
 const state = {
   gl: null,
@@ -253,8 +267,8 @@ function updateSinglePointerDrag(event) {
   const aspect = canvas.width / canvas.height;
   const xScale = aspect > 1 ? aspect : 1;
   const yScale = aspect < 1 ? 1 / aspect : 1;
-  state.pan[0] += (dx / canvas.clientWidth) * 2 * xScale / state.zoom;
-  state.pan[1] -= (dy / canvas.clientHeight) * 2 * yScale / state.zoom;
+  state.pan[0] += ((dx / canvas.clientWidth) * 2 * xScale) / state.zoom;
+  state.pan[1] -= ((dy / canvas.clientHeight) * 2 * yScale) / state.zoom;
   state.lastPointer = [event.clientX, event.clientY];
   state.needsRender = true;
 }
@@ -370,10 +384,7 @@ function bindControls() {
 }
 
 async function loadData() {
-  const [metaResponse, pointsResponse] = await Promise.all([
-    fetch("./meta.json"),
-    fetch("./points.bin"),
-  ]);
+  const [metaResponse, pointsResponse] = await Promise.all([fetch("./meta.json"), fetch("./points.bin")]);
   if (!metaResponse.ok || !pointsResponse.ok) {
     throw new Error("Could not load generated visualization data.");
   }

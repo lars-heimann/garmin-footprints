@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "target": "ES2023",
+    "types": ["node"]
+  },
+  "include": [
+    "apps/**/*.js",
+    "apps/**/*.mjs",
+    "scripts/**/*.mjs",
+    "template/**/*.js",
+    "tests/**/*.mjs",
+    "eslint.config.js"
+  ],
+  "exclude": ["node_modules", ".wrangler", "infra/**/.terraform"]
+}
