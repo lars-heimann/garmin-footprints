@@ -23,6 +23,10 @@ resource "cloudflare_d1_database" "app" {
 resource "cloudflare_worker" "app" {
   account_id = var.cloudflare_account_id
   name       = var.worker_name
+
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 resource "cloudflare_dns_record" "root" {
