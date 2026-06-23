@@ -33,6 +33,13 @@ export class MemoryStore {
     return true;
   }
 
+  async releaseSlug(slug, jobId) {
+    const existing = this.slugs.get(slug);
+    if (existing?.jobId === jobId) {
+      this.slugs.delete(slug);
+    }
+  }
+
   async createJob(job) {
     this.jobs.set(job.jobId, { ...job });
   }

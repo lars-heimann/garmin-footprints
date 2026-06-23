@@ -39,6 +39,7 @@ let activePoll = null;
 let submitting = false;
 let turnstileRequired = false;
 let turnstileWidgetId = null;
+let maxZipBytes = null;
 
 const ERROR_MESSAGES = {
   GARMIN_EXPORT_NOT_FOUND: "This ZIP does not contain Garmin account export folders.",
@@ -87,10 +88,18 @@ function messageForError(payload = {}) {
   return ERROR_MESSAGES[payload.errorCode] || payload.errorMessage || payload.errorCode || "";
 }
 
+function formatBytes(bytes) {
+  const mib = bytes / (1024 * 1024);
+  return `${Math.floor(mib)} MB`;
+}
+
 function classifyFileError(file) {
   if (!file) return "Choose a Garmin ZIP first.";
   if (file.size === 0) {
     return "This file is empty. If it is an iCloud or Dropbox placeholder, download the real Garmin ZIP first.";
+  }
+  if (maxZipBytes && file.size > maxZipBytes) {
+    return `This ZIP is ${formatBytes(file.size)}. The current upload limit is ${formatBytes(maxZipBytes)}.`;
   }
   const name = file.name.toLowerCase();
   if (name.endsWith(".fit") || name.endsWith(".gpx") || name.endsWith(".tcx")) {
@@ -240,6 +249,7 @@ form.addEventListener("submit", async (event) => {
 async function initTurnstile() {
   try {
     const config = await apiFetch("/api/config", { headers: {} });
+    maxZipBytes = Number.isFinite(Number(config.maxZipBytes)) ? Number(config.maxZipBytes) : null;
     if (!config.turnstileSiteKey) {
       updateSubmitAvailability();
       return;

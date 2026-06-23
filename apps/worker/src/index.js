@@ -14,7 +14,7 @@ const RESERVED_SLUGS = new Set([
   "jobs",
 ]);
 const ALLOWED_ASSETS = new Set(["index.html", "app.js", "styles.css", "meta.json", "points.bin"]);
-const DEFAULT_MAX_ZIP_BYTES = 500 * 1024 * 1024;
+const DEFAULT_MAX_ZIP_BYTES = 100 * 1024 * 1024;
 const DEFAULT_START_DATE = "2022-05-01";
 const DEFAULT_MAX_POINTS = 900_000;
 const DEFAULT_PUBLIC_HOST_SUFFIX = "runmaps.larsheimann.com";
@@ -214,16 +214,13 @@ async function createUploadSession(request, env) {
   if (!invite) {
     return errorResponse("INVALID_INVITE", "Invite code was not found.", 403);
   }
-
-  const consumed = await store.incrementInviteUse(inviteHash);
-  if (!consumed) {
+  if (Number(invite.uses || 0) >= Number(invite.maxUses || 0)) {
     return errorResponse("INVITE_EXHAUSTED", "Invite code has no remaining uses.", 403);
   }
 
   const jobId = crypto.randomUUID();
   const reserved = await store.reserveSlug(slug, jobId, now);
   if (!reserved) {
-    await store.decrementInviteUse(inviteHash);
     return errorResponse("SLUG_TAKEN", "That slug is already reserved.", 409);
   }
 
@@ -298,11 +295,25 @@ async function receiveUpload(request, env, ctx, jobId, token) {
     return errorResponse("INVALID_STATUS", "Job is not waiting for upload.", 409);
   }
 
+  const consumed = await store.incrementInviteUse(job.inviteCodeHash);
+  if (!consumed) {
+    const now = new Date().toISOString();
+    await store.releaseSlug(job.slug, jobId);
+    await store.updateJob(jobId, {
+      status: "expired",
+      updatedAt: now,
+      errorCode: "INVITE_EXHAUSTED",
+      errorMessage: "Invite code has no remaining uses.",
+    });
+    return errorResponse("INVITE_EXHAUSTED", "Invite code has no remaining uses.", 403);
+  }
+
   try {
     await getBucket(env).put(job.uploadKey, limitStreamBytes(request.body, maxZipBytes(env), "ZIP_TOO_LARGE"), {
       httpMetadata: { contentType: "application/zip" },
     });
   } catch (error) {
+    await store.decrementInviteUse(job.inviteCodeHash);
     if (isStreamLimitError(error, "ZIP_TOO_LARGE")) {
       await getBucket(env)
         .delete(job.uploadKey)
@@ -473,6 +484,10 @@ class D1Store {
       }
       throw error;
     }
+  }
+
+  async releaseSlug(slug, jobId) {
+    await this.db.prepare("DELETE FROM slugs WHERE slug = ? AND job_id = ?").bind(slug, jobId).run();
   }
 
   async createJob(job) {
@@ -767,6 +782,7 @@ export async function reapStaleJobs(env, nowMs = Date.now()) {
         errorCode: "UPLOAD_SESSION_EXPIRED",
         errorMessage: "Upload session expired before a ZIP was received.",
       });
+      await store.releaseSlug(job.slug, job.jobId);
       result.expired += 1;
     } else if (job.status === "queued" && job.updatedAt < cutoffs.queuedCutoff) {
       nextStatus = "failed";

@@ -124,11 +124,12 @@ test("requires Turnstile when configured", async () => {
   assert.equal(passed.status, 200);
 });
 
-test("reserves slugs uniquely and enforces invite use limits", async () => {
+test("reserves slugs uniquely and only spends invites when uploads are accepted", async () => {
   const env = await makeEnv([
     ["ALPHA-1", 1],
     ["BETA-2", 2],
   ]);
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
 
   const first = await worker.fetch(
     new Request("https://runs.example.com/api/upload-sessions", {
@@ -139,6 +140,20 @@ test("reserves slugs uniquely and enforces invite use limits", async () => {
     waitContext().ctx
   );
   assert.equal(first.status, 200);
+  const firstSession = await json(first);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
+
+  const upload = await worker.fetch(
+    new Request(firstSession.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Length": "8", "Content-Type": "application/zip" },
+      body: "zip-data",
+    }),
+    env,
+    waitContext().ctx
+  );
+  assert.equal(upload.status, 200);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
 
   const exhausted = await worker.fetch(
     new Request("https://runs.example.com/api/upload-sessions", {
@@ -163,6 +178,7 @@ test("reserves slugs uniquely and enforces invite use limits", async () => {
 
 test("streams uploads, rejects oversized ZIPs, and exposes queued job status", async () => {
   const env = await makeEnv();
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { ctx, pending } = waitContext();
   const sessionResponse = await worker.fetch(
     new Request("https://runs.example.com/api/upload-sessions", {
@@ -184,6 +200,7 @@ test("streams uploads, rejects oversized ZIPs, and exposes queued job status", a
     ctx
   );
   assert.equal(tooLarge.status, 413);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
 
   const missingLength = await worker.fetch(
     new Request(session.uploadUrl, {
@@ -194,6 +211,7 @@ test("streams uploads, rejects oversized ZIPs, and exposes queued job status", a
     ctx
   );
   assert.equal(missingLength.status, 411);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
 
   const upload = await worker.fetch(
     new Request(session.uploadUrl, {
@@ -205,6 +223,7 @@ test("streams uploads, rejects oversized ZIPs, and exposes queued job status", a
     ctx
   );
   assert.equal(upload.status, 200);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
   await Promise.all(pending);
 
   const status = await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx);
@@ -226,6 +245,7 @@ test("streams uploads, rejects oversized ZIPs, and exposes queued job status", a
 
 test("rejects uploads that exceed the limit even when Content-Length lies", async () => {
   const env = await makeEnv();
+  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { ctx } = waitContext();
   const sessionResponse = await worker.fetch(
     new Request("https://runs.example.com/api/upload-sessions", {
@@ -251,6 +271,7 @@ test("rejects uploads that exceed the limit even when Content-Length lies", asyn
     ctx
   );
   assert.equal(upload.status, 413);
+  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
   assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
 
   const status = await json(
@@ -490,4 +511,35 @@ test("reaper expires stale jobs and retries raw ZIP deletion", async () => {
   assert.equal(status.errorCode, "PROCESSOR_TIMEOUT");
   assert.ok(status.rawUploadDeletedAt);
   assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
+});
+
+test("reaper releases slugs for stale reserved upload sessions", async () => {
+  const env = await makeEnv();
+  const { ctx } = waitContext();
+  const session = await json(
+    await worker.fetch(
+      new Request("https://runs.example.com/api/upload-sessions", {
+        method: "POST",
+        body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
+      }),
+      env,
+      ctx
+    )
+  );
+
+  const stale = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  await env.__TEST_STORE.updateJob(session.jobId, { updatedAt: stale });
+  const result = await reapStaleJobs(env, Date.now());
+
+  assert.equal(result.expired, 1);
+  assert.equal(env.__TEST_STORE.slugs.has("runner"), false);
+  const retry = await worker.fetch(
+    new Request("https://runs.example.com/api/upload-sessions", {
+      method: "POST",
+      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
+    }),
+    env,
+    ctx
+  );
+  assert.equal(retry.status, 200);
 });
