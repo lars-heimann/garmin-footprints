@@ -13,6 +13,7 @@ Production targets:
 4. Run the `Deploy Production` workflow.
 
 The deploy workflow runs quality checks, tests, OpenTofu apply, D1 migrations, Worker secret upload, Worker/static asset deploy, and a production smoke test.
+On the first deploy it applies base Cloudflare/GitHub resources before Worker routes, deploys the Worker with Wrangler, then applies the routes after the Worker script exists.
 
 ## Runtime Resources
 
@@ -25,6 +26,8 @@ OpenTofu provisions:
 - Worker routes for root and wildcard hostnames
 - generated secrets for invite hashing, upload tokens, and processor auth
 - GitHub Actions variables/secrets used by deploy, processor, invite, and reaper workflows
+
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, `TOFU_STATE_BUCKET`, and optional `TURNSTILE_SITE_KEY` are manually seeded GitHub variables because the workflow needs them before OpenTofu can run.
 
 Wrangler deploys Worker code and static upload app assets using a generated production config.
 

@@ -40,12 +40,14 @@ resource "cloudflare_dns_record" "wildcard" {
 }
 
 resource "cloudflare_workers_route" "root" {
+  count   = var.create_worker_routes ? 1 : 0
   zone_id = var.cloudflare_zone_id
   pattern = "${var.domain}/*"
   script  = cloudflare_worker.app.name
 }
 
 resource "cloudflare_workers_route" "wildcard" {
+  count   = var.create_worker_routes ? 1 : 0
   zone_id = var.cloudflare_zone_id
   pattern = "*.${var.domain}/*"
   script  = cloudflare_worker.app.name
@@ -64,18 +66,6 @@ resource "random_password" "upload_token_secret" {
 resource "random_password" "processor_token" {
   length  = 48
   special = false
-}
-
-resource "github_actions_variable" "cloudflare_account_id" {
-  repository    = var.github_repository
-  variable_name = "CLOUDFLARE_ACCOUNT_ID"
-  value         = var.cloudflare_account_id
-}
-
-resource "github_actions_variable" "cloudflare_zone_id" {
-  repository    = var.github_repository
-  variable_name = "CLOUDFLARE_ZONE_ID"
-  value         = var.cloudflare_zone_id
 }
 
 resource "github_actions_variable" "worker_name" {
@@ -120,34 +110,27 @@ resource "github_actions_variable" "d1_database_id" {
   value         = cloudflare_d1_database.app.id
 }
 
-resource "github_actions_variable" "turnstile_site_key" {
-  count         = var.turnstile_site_key == "" ? 0 : 1
-  repository    = var.github_repository
-  variable_name = "TURNSTILE_SITE_KEY"
-  value         = var.turnstile_site_key
-}
-
 resource "github_actions_secret" "invite_hash_secret" {
-  repository      = var.github_repository
-  secret_name     = "INVITE_HASH_SECRET"
-  plaintext_value = random_password.invite_hash_secret.result
+  repository  = var.github_repository
+  secret_name = "INVITE_HASH_SECRET"
+  value       = random_password.invite_hash_secret.result
 }
 
 resource "github_actions_secret" "upload_token_secret" {
-  repository      = var.github_repository
-  secret_name     = "UPLOAD_TOKEN_SECRET"
-  plaintext_value = random_password.upload_token_secret.result
+  repository  = var.github_repository
+  secret_name = "UPLOAD_TOKEN_SECRET"
+  value       = random_password.upload_token_secret.result
 }
 
 resource "github_actions_secret" "processor_token" {
-  repository      = var.github_repository
-  secret_name     = "PROCESSOR_TOKEN"
-  plaintext_value = random_password.processor_token.result
+  repository  = var.github_repository
+  secret_name = "PROCESSOR_TOKEN"
+  value       = random_password.processor_token.result
 }
 
 resource "github_actions_secret" "turnstile_secret_key" {
-  count           = var.turnstile_secret_key == "" ? 0 : 1
-  repository      = var.github_repository
-  secret_name     = "TURNSTILE_SECRET_KEY"
-  plaintext_value = var.turnstile_secret_key
+  count       = var.turnstile_secret_key == "" ? 0 : 1
+  repository  = var.github_repository
+  secret_name = "TURNSTILE_SECRET_KEY"
+  value       = var.turnstile_secret_key
 }

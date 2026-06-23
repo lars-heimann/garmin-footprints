@@ -55,6 +55,12 @@ variable "r2_location" {
   default     = "WEUR"
 }
 
+variable "create_worker_routes" {
+  description = "Whether to create Worker routes. First deploy creates the Worker script with Wrangler before enabling routes."
+  type        = bool
+  default     = true
+}
+
 variable "turnstile_site_key" {
   description = "Optional existing Cloudflare Turnstile site key."
   type        = string

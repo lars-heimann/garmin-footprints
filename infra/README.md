@@ -40,6 +40,14 @@ tofu apply
 ```
 
 The deploy workflow reads OpenTofu outputs, writes a temporary Wrangler config, runs D1 migrations, uploads Worker secrets, and deploys the Worker/static assets.
+Worker routes are applied after the Wrangler deploy step because Cloudflare rejects routes for a script that has not been uploaded yet.
+
+Seed these GitHub Actions variables manually before running the workflow because they are inputs to OpenTofu itself:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_ZONE_ID`
+- `TOFU_STATE_BUCKET`
+- `TURNSTILE_SITE_KEY`, if Turnstile is enabled
 
 ## Processor Dispatch Token
 

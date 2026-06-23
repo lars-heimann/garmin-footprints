@@ -1,4 +1,6 @@
 .DS_Store
+.env
+.env.*
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -7,6 +9,9 @@ __pycache__/
 .wrangler/
 .terraform/
 **/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
 node_modules/
 dist/
 tmp/

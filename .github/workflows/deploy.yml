@@ -70,7 +70,9 @@ jobs:
           use_path_style              = true
           EOF
 
-      - name: OpenTofu apply
+      - name: OpenTofu apply base resources
+        env:
+          TF_VAR_create_worker_routes: "false"
         run: |
           tofu -chdir=infra/prod init -backend-config=backend.hcl
           tofu -chdir=infra/prod apply -auto-approve
@@ -124,6 +126,9 @@ jobs:
 
       - name: Deploy Worker
         run: npx wrangler deploy --config /tmp/wrangler.prod.jsonc
+
+      - name: OpenTofu apply Worker routes
+        run: tofu -chdir=infra/prod apply -auto-approve
 
       - name: Production smoke test
         run: curl -fsS "$WORKER_API_BASE/api/config"
