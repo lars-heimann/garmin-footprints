@@ -137,4 +137,4 @@ jobs:
         run: tofu -chdir=infra/prod apply -auto-approve
 
       - name: Production smoke test
-        run: curl -fsS "$WORKER_API_BASE/api/config"
+        run: curl --fail --show-error --silent --retry 8 --retry-all-errors --retry-delay 5 "$WORKER_API_BASE/api/config"
