@@ -1,0 +1,54 @@
+# Run Maps Infrastructure
+
+Production is designed for `https://runmaps.larsheimann.com` with generated maps at
+`https://{slug}.runmaps.larsheimann.com`.
+
+## Stacks
+
+- `bootstrap` creates the private R2 bucket used for OpenTofu state.
+- `prod` creates the app R2 bucket, D1 database, DNS records, Worker routes, generated app secrets, and GitHub Actions configuration.
+
+The first unavoidable manual step is providing credentials to OpenTofu/GitHub Actions:
+
+- `CLOUDFLARE_API_TOKEN` with scoped access to the account and `larsheimann.com` zone.
+- `GH_ADMIN_TOKEN` for the GitHub provider to manage repository Actions secrets and variables.
+- `PROCESSOR_GITHUB_TOKEN`, a separate fine-grained GitHub token that can dispatch the processor workflow.
+- R2 S3 credentials for the OpenTofu state backend.
+- A temporary invite-code secret such as `NEXT_INVITE_CODE` before running the invite workflow.
+
+After that, CI can run plan/apply, migrations, Worker deploy, smoke tests, and processor jobs without dashboard clicks.
+
+## Bootstrap
+
+```sh
+cd infra/bootstrap
+tofu init
+tofu apply \
+  -var cloudflare_account_id="$CLOUDFLARE_ACCOUNT_ID" \
+  -var state_bucket_name="runmaps-tofu-state"
+```
+
+Copy `infra/prod/backend.example.hcl` to a secure local/CI backend config and fill in the account-specific R2 S3 endpoint and credentials.
+
+## Production
+
+```sh
+cd infra/prod
+tofu init -backend-config=backend.hcl
+tofu plan
+tofu apply
+```
+
+The deploy workflow reads OpenTofu outputs, writes a temporary Wrangler config, runs D1 migrations, uploads Worker secrets, and deploys the Worker/static assets.
+
+## Processor Dispatch Token
+
+The Worker dispatches `.github/workflows/process-job.yml` through the GitHub Actions API after a ZIP upload is accepted.
+Create a fine-grained GitHub token for this repository with Actions write access and store it as the repository secret
+`PROCESSOR_GITHUB_TOKEN`. Do not reuse the broader `GH_ADMIN_TOKEN` at runtime.
+
+## Invite Codes
+
+Create an invite code locally, store it as a GitHub Actions secret such as `NEXT_INVITE_CODE`, then run the
+`Create Invite` workflow with `codeSecretName=NEXT_INVITE_CODE`. The workflow hashes the code and inserts only the hash
+into D1; the plaintext code is masked and is not passed as a workflow-dispatch input.

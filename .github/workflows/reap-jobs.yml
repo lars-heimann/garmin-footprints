@@ -1,0 +1,23 @@
+name: Reap Stale Jobs
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reap:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger authenticated reaper
+        env:
+          WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
+          PROCESSOR_TOKEN: ${{ secrets.PROCESSOR_TOKEN }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $PROCESSOR_TOKEN" \
+            "$WORKER_API_BASE/api/processor/reap"

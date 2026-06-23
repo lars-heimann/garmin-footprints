@@ -1,0 +1,129 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TF_IN_AUTOMATION: "true"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+      TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      TF_VAR_github_owner: ${{ github.repository_owner }}
+      TF_VAR_github_repository: ${{ github.event.repository.name }}
+      TF_VAR_turnstile_site_key: ${{ vars.TURNSTILE_SITE_KEY }}
+      TF_VAR_turnstile_secret_key: ${{ secrets.TURNSTILE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.9.0"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -r processor/requirements-dev.txt
+
+      - name: Quality and tests
+        run: |
+          npm run quality
+          npm run test:worker
+          npm run test:processor
+          npm run test:e2e
+
+      - name: Write OpenTofu backend config
+        env:
+          STATE_BUCKET: ${{ vars.TOFU_STATE_BUCKET }}
+          STATE_ACCESS_KEY_ID: ${{ secrets.TOFU_STATE_ACCESS_KEY_ID }}
+          STATE_SECRET_ACCESS_KEY: ${{ secrets.TOFU_STATE_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/prod/backend.hcl <<EOF
+          bucket                      = "$STATE_BUCKET"
+          key                         = "prod/opentofu.tfstate"
+          region                      = "auto"
+          endpoint                    = "https://${TF_VAR_cloudflare_account_id}.r2.cloudflarestorage.com"
+          access_key                  = "$STATE_ACCESS_KEY_ID"
+          secret_key                  = "$STATE_SECRET_ACCESS_KEY"
+          skip_credentials_validation = true
+          skip_metadata_api_check     = true
+          skip_region_validation      = true
+          skip_requesting_account_id  = true
+          use_path_style              = true
+          EOF
+
+      - name: OpenTofu apply
+        run: |
+          tofu -chdir=infra/prod init -backend-config=backend.hcl
+          tofu -chdir=infra/prod apply -auto-approve
+
+      - name: Export OpenTofu outputs
+        run: |
+          {
+            echo "R2_BUCKET_NAME=$(tofu -chdir=infra/prod output -raw r2_bucket_name)"
+            echo "D1_DATABASE_NAME=$(tofu -chdir=infra/prod output -raw d1_database_name)"
+            echo "D1_DATABASE_ID=$(tofu -chdir=infra/prod output -raw d1_database_id)"
+            echo "PUBLIC_HOST_SUFFIX=$(tofu -chdir=infra/prod output -raw public_host_suffix)"
+            echo "PUBLIC_SITE_URL_PATTERN=$(tofu -chdir=infra/prod output -raw public_site_url_pattern)"
+            echo "WORKER_API_BASE=$(tofu -chdir=infra/prod output -raw worker_api_base)"
+            echo "INVITE_HASH_SECRET=$(tofu -chdir=infra/prod output -raw invite_hash_secret)"
+            echo "UPLOAD_TOKEN_SECRET=$(tofu -chdir=infra/prod output -raw upload_token_secret)"
+            echo "PROCESSOR_TOKEN=$(tofu -chdir=infra/prod output -raw processor_token)"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate Wrangler config
+        env:
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          PROCESSOR_REF: main
+          PROCESSOR_WORKFLOW: process-job.yml
+        run: node scripts/write-wrangler-production-config.mjs /tmp/wrangler.prod.jsonc
+
+      - name: Upload Worker secrets
+        env:
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          PROCESSOR_GITHUB_TOKEN: ${{ secrets.PROCESSOR_GITHUB_TOKEN }}
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const secrets = {
+            INVITE_HASH_SECRET: process.env.INVITE_HASH_SECRET,
+            UPLOAD_TOKEN_SECRET: process.env.UPLOAD_TOKEN_SECRET,
+            PROCESSOR_TOKEN: process.env.PROCESSOR_TOKEN,
+            GITHUB_TOKEN: process.env.PROCESSOR_GITHUB_TOKEN,
+          };
+          if (process.env.TURNSTILE_SECRET_KEY) {
+            secrets.TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY;
+          }
+          for (const [name, value] of Object.entries(secrets)) {
+            if (!value) throw new Error(`${name} is required`);
+          }
+          fs.writeFileSync("/tmp/wrangler-secrets.json", JSON.stringify(secrets));
+          NODE
+          npx wrangler secret bulk /tmp/wrangler-secrets.json --config /tmp/wrangler.prod.jsonc
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply "$D1_DATABASE_NAME" --config /tmp/wrangler.prod.jsonc --remote
+
+      - name: Deploy Worker
+        run: npx wrangler deploy --config /tmp/wrangler.prod.jsonc
+
+      - name: Production smoke test
+        run: curl -fsS "$WORKER_API_BASE/api/config"

@@ -1,0 +1,58 @@
+name: Create Invite
+
+on:
+  workflow_dispatch:
+    inputs:
+      codeSecretName:
+        description: Name of the GitHub secret containing the invite code
+        required: true
+        default: NEXT_INVITE_CODE
+        type: string
+      maxUses:
+        description: Maximum uses
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INVITE_HASH_SECRET: ${{ secrets.INVITE_HASH_SECRET }}
+      R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      PUBLIC_HOST_SUFFIX: ${{ vars.PUBLIC_HOST_SUFFIX }}
+      PUBLIC_SITE_URL_PATTERN: ${{ vars.PUBLIC_SITE_URL_PATTERN }}
+      TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Wrangler config
+        run: node scripts/write-wrangler-production-config.mjs /tmp/wrangler.prod.jsonc
+
+      - name: Insert invite hash
+        env:
+          INVITE_CODE: ${{ secrets[inputs.codeSecretName] }}
+          MAX_USES: ${{ inputs.maxUses }}
+        run: |
+          if [ -z "$INVITE_CODE" ]; then
+            echo "Invite code secret was empty or missing." >&2
+            exit 1
+          fi
+          echo "::add-mask::$INVITE_CODE"
+          SQL=$(node scripts/create-invite-sql.mjs --code "$INVITE_CODE" --max-uses "$MAX_USES" --secret "$INVITE_HASH_SECRET")
+          npx wrangler d1 execute "$D1_DATABASE_NAME" --config /tmp/wrangler.prod.jsonc --remote --command "$SQL"

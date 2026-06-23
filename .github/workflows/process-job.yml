@@ -11,6 +11,10 @@ on:
 jobs:
   process:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: process-${{ inputs.jobId }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +27,12 @@ jobs:
 
       - name: Process job
         env:
-          WORKER_API_BASE: ${{ secrets.WORKER_API_BASE }}
+          JOB_ID: ${{ inputs.jobId }}
+          WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
           PROCESSOR_TOKEN: ${{ secrets.PROCESSOR_TOKEN }}
         run: >-
           python processor/process_job.py
-          --job-id "${{ inputs.jobId }}"
+          --job-id "$JOB_ID"
           --api-base "$WORKER_API_BASE"
           --processor-token "$PROCESSOR_TOKEN"
           --template-dir template
