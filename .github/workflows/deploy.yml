@@ -79,6 +79,12 @@ jobs:
 
       - name: Export OpenTofu outputs
         run: |
+          INVITE_HASH_SECRET="$(tofu -chdir=infra/prod output -raw invite_hash_secret)"
+          UPLOAD_TOKEN_SECRET="$(tofu -chdir=infra/prod output -raw upload_token_secret)"
+          PROCESSOR_TOKEN="$(tofu -chdir=infra/prod output -raw processor_token)"
+          echo "::add-mask::$INVITE_HASH_SECRET"
+          echo "::add-mask::$UPLOAD_TOKEN_SECRET"
+          echo "::add-mask::$PROCESSOR_TOKEN"
           {
             echo "R2_BUCKET_NAME=$(tofu -chdir=infra/prod output -raw r2_bucket_name)"
             echo "D1_DATABASE_NAME=$(tofu -chdir=infra/prod output -raw d1_database_name)"
@@ -86,9 +92,9 @@ jobs:
             echo "PUBLIC_HOST_SUFFIX=$(tofu -chdir=infra/prod output -raw public_host_suffix)"
             echo "PUBLIC_SITE_URL_PATTERN=$(tofu -chdir=infra/prod output -raw public_site_url_pattern)"
             echo "WORKER_API_BASE=$(tofu -chdir=infra/prod output -raw worker_api_base)"
-            echo "INVITE_HASH_SECRET=$(tofu -chdir=infra/prod output -raw invite_hash_secret)"
-            echo "UPLOAD_TOKEN_SECRET=$(tofu -chdir=infra/prod output -raw upload_token_secret)"
-            echo "PROCESSOR_TOKEN=$(tofu -chdir=infra/prod output -raw processor_token)"
+            echo "INVITE_HASH_SECRET=$INVITE_HASH_SECRET"
+            echo "UPLOAD_TOKEN_SECRET=$UPLOAD_TOKEN_SECRET"
+            echo "PROCESSOR_TOKEN=$PROCESSOR_TOKEN"
           } >> "$GITHUB_ENV"
 
       - name: Generate Wrangler config

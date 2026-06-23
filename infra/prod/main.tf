@@ -64,16 +64,25 @@ resource "cloudflare_workers_route" "wildcard" {
 resource "random_password" "invite_hash_secret" {
   length  = 48
   special = false
+  keepers = {
+    rotation_id = var.app_secret_rotation_id
+  }
 }
 
 resource "random_password" "upload_token_secret" {
   length  = 48
   special = false
+  keepers = {
+    rotation_id = var.app_secret_rotation_id
+  }
 }
 
 resource "random_password" "processor_token" {
   length  = 48
   special = false
+  keepers = {
+    rotation_id = var.app_secret_rotation_id
+  }
 }
 
 resource "github_actions_variable" "worker_name" {

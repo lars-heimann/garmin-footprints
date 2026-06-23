@@ -61,6 +61,12 @@ variable "create_worker_routes" {
   default     = true
 }
 
+variable "app_secret_rotation_id" {
+  description = "Bump to rotate generated app secrets after exposure or on scheduled rotation."
+  type        = string
+  default     = "2026-06-23-rotate-1"
+}
+
 variable "turnstile_site_key" {
   description = "Optional existing Cloudflare Turnstile site key."
   type        = string
