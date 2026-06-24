@@ -24,6 +24,11 @@ const meterFill = mustElement("meterFill", HTMLSpanElement);
 const playPause = mustElement("playPause", HTMLButtonElement);
 const replay = mustElement("replay", HTMLButtonElement);
 const resetView = mustElement("resetView", HTMLButtonElement);
+const shareMap = mustElement("shareMap", HTMLButtonElement);
+const sharePrompt = mustElement("sharePrompt", HTMLElement);
+const sharePromptButton = mustElement("sharePromptButton", HTMLButtonElement);
+const closeSharePrompt = mustElement("closeSharePrompt", HTMLButtonElement);
+const shareFeedback = mustElement("shareFeedback", HTMLParagraphElement);
 const timeSlider = mustElement("timeSlider", HTMLInputElement);
 
 const state = {
@@ -43,6 +48,14 @@ const state = {
   lastFrame: performance.now(),
   needsRender: true,
 };
+
+function isPublicViewer() {
+  return window.parent === window && !state.meta?.localOnly;
+}
+
+function shareUrl() {
+  return state.meta?.siteUrl || window.location.href;
+}
 
 const vertexShaderSource = `
   attribute vec2 a_position;
@@ -96,6 +109,66 @@ const fragmentShaderSource = `
 function showError(message) {
   errorBox.hidden = false;
   errorBox.textContent = message;
+}
+
+function showShareFeedback(message) {
+  shareFeedback.textContent = message;
+  shareFeedback.hidden = false;
+}
+
+async function copyShareUrl(url) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(url);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = url;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-1000px";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+async function shareCurrentMap() {
+  const url = shareUrl();
+  const title = state.meta?.viewerTitle || document.title || "Running Footprints";
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text: "My running footprints map", url });
+      showShareFeedback("Share menu opened.");
+      return;
+    }
+    await copyShareUrl(url);
+    showShareFeedback("Link copied.");
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    try {
+      await copyShareUrl(url);
+      showShareFeedback("Link copied.");
+    } catch {
+      showShareFeedback("Could not copy the link. Use the address bar instead.");
+    }
+  }
+}
+
+function maybeShowSharePrompt() {
+  if (!isPublicViewer()) return;
+  shareMap.hidden = false;
+  const key = `runmaps-share-prompt:${shareUrl()}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+  } catch {
+    // Some embedded or strict privacy contexts block session storage.
+  }
+  sharePrompt.hidden = false;
+  try {
+    sessionStorage.setItem(key, "shown");
+  } catch {
+    // The prompt can still be dismissed manually.
+  }
 }
 
 function compileShader(gl, type, source) {
@@ -331,6 +404,11 @@ function bindControls() {
   });
 
   resetView.addEventListener("click", resetCamera);
+  shareMap.addEventListener("click", shareCurrentMap);
+  sharePromptButton.addEventListener("click", shareCurrentMap);
+  closeSharePrompt.addEventListener("click", () => {
+    sharePrompt.hidden = true;
+  });
 
   timeSlider.addEventListener("input", () => {
     state.progress = Number(timeSlider.value) / 1000;
@@ -461,6 +539,7 @@ async function main() {
   try {
     await loadData();
     applyMetadata();
+    maybeShowSharePrompt();
     initializeGl();
     bindControls();
     requestAnimationFrame(frame);

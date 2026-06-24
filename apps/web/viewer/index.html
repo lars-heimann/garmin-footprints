@@ -41,10 +41,26 @@
         </details>
       </section>
 
-      <section class="status">
-        <p id="currentDate">Loading data...</p>
-        <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
-      </section>
+      <div class="status-stack">
+        <section class="status">
+          <p id="currentDate">Loading data...</p>
+          <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
+        </section>
+        <button id="shareMap" class="share-fab" type="button" hidden aria-label="Share map">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12"></path>
+            <path d="m7 8 5-5 5 5"></path>
+            <path d="M5 13v6h14v-6"></path>
+          </svg>
+        </button>
+        <aside id="sharePrompt" class="share-prompt" hidden aria-live="polite">
+          <button id="closeSharePrompt" class="icon-button" type="button" aria-label="Close share prompt">X</button>
+          <p class="share-title">Share this running map</p>
+          <p class="share-copy">Send the public link to friends before it expires.</p>
+          <button id="sharePromptButton" type="button">Share link</button>
+          <p id="shareFeedback" class="share-feedback" hidden></p>
+        </aside>
+      </div>
     </main>
 
     <nav class="controls" aria-label="Visualization controls">

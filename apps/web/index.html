@@ -88,6 +88,10 @@
             </label>
           </fieldset>
 
+          <section id="localPreviewPanel" class="local-preview-panel" hidden>
+            <iframe id="localPreviewFrame" title="Local running footprint preview"></iframe>
+          </section>
+
           <fieldset id="publishFields" class="grid publish-panel" hidden>
             <legend>Step 2: Publish for sharing</legend>
             <p class="wide publish-copy">
@@ -119,10 +123,6 @@
         <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
         <a id="deleteLink" hidden target="_blank" rel="noopener noreferrer"></a>
       </aside>
-
-      <section id="localPreviewPanel" class="local-preview-panel" hidden>
-        <iframe id="localPreviewFrame" title="Local running footprint preview"></iframe>
-      </section>
     </main>
 
     <dialog id="guideDialog" class="guide-dialog">
