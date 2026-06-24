@@ -67,7 +67,7 @@ canvas:active {
 }
 
 .summary {
-  pointer-events: auto;
+  pointer-events: none;
   width: min(27rem, calc(100vw - 2rem));
   padding: 1.15rem;
 }
@@ -91,9 +91,14 @@ h1 {
 
 dl {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.8fr);
   gap: 0.75rem;
+  align-items: start;
   margin: 1.2rem 0 0;
+}
+
+dl div {
+  min-width: 0;
 }
 
 dt {
@@ -106,10 +111,12 @@ dt {
 
 dd {
   margin: 0.2rem 0 0;
-  overflow-wrap: anywhere;
   color: #fffaf0;
-  font-size: 0.96rem;
+  font-size: clamp(0.82rem, 3.5vw, 0.96rem);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
+  line-height: 1.18;
+  white-space: nowrap;
 }
 
 .about-map {
@@ -119,6 +126,7 @@ dd {
 }
 
 .about-map summary {
+  pointer-events: auto;
   width: fit-content;
   cursor: pointer;
   user-select: none;
@@ -167,8 +175,59 @@ dd {
   margin-top: 0.55rem;
 }
 
-.status-stack {
+.about-map-content .inspiration {
+  color: rgba(244, 241, 232, 0.56);
+  font-size: 0.78rem;
+}
+
+.inspiration a {
   pointer-events: auto;
+  color: #f0bd5f;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.inspiration a:hover,
+.inspiration a:focus-visible {
+  color: #fff8e8;
+  text-decoration: underline;
+  outline: none;
+}
+
+.profile-links {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.profile-links a {
+  pointer-events: auto;
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
+  place-items: center;
+  border: 1px solid rgba(244, 241, 232, 0.16);
+  border-radius: var(--corner-radius);
+  background: rgba(244, 241, 232, 0.07);
+  color: rgba(244, 241, 232, 0.84);
+}
+
+.profile-links a:hover,
+.profile-links a:focus-visible {
+  border-color: rgba(240, 189, 95, 0.72);
+  background: rgba(240, 189, 95, 0.14);
+  color: #fff8e8;
+  outline: none;
+}
+
+.profile-links svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentcolor;
+}
+
+.status-stack {
+  pointer-events: none;
   display: grid;
   justify-items: end;
   width: min(21rem, calc(100vw - 2rem));
@@ -201,18 +260,20 @@ dd {
 }
 
 .controls {
+  pointer-events: none;
   position: fixed;
   right: clamp(1rem, 3vw, 2rem);
   bottom: clamp(1rem, 3vw, 2rem);
   left: clamp(1rem, 3vw, 2rem);
   display: grid;
-  grid-template-columns: auto auto auto minmax(12rem, 1fr);
+  grid-template-columns: auto auto minmax(12rem, 1fr);
   gap: 0.65rem;
   align-items: center;
   padding: 0.75rem;
 }
 
 button {
+  pointer-events: auto;
   min-height: 2.55rem;
   border: 1px solid rgba(244, 241, 232, 0.18);
   border-radius: 10px;
@@ -232,6 +293,7 @@ button:focus-visible {
 }
 
 label {
+  pointer-events: auto;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.75rem;
@@ -249,6 +311,7 @@ input[type="range"] {
 }
 
 .share-fab {
+  pointer-events: auto;
   display: inline-grid;
   width: 2.85rem;
   min-height: 2.85rem;
@@ -272,6 +335,7 @@ input[type="range"] {
 }
 
 .share-prompt {
+  pointer-events: auto;
   position: relative;
   width: min(20rem, 100%);
   margin-top: 0.65rem;
@@ -348,6 +412,13 @@ input[type="range"] {
 
   .controls {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .controls button {
+    width: 100%;
+    padding: 0 0.35rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
   }
 
   label {

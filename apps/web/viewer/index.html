@@ -22,10 +22,6 @@
             <dt>Runs</dt>
             <dd id="runCount">...</dd>
           </div>
-          <div>
-            <dt>Range</dt>
-            <dd id="dateRange">...</dd>
-          </div>
         </dl>
         <details class="about-map">
           <summary>About this map</summary>
@@ -33,10 +29,59 @@
             <p id="aboutMap">
               This map visualizes running routes from a Garmin account export. Brighter streets were run more often.
             </p>
+            <p id="dateRangeCopy"></p>
             <p>
               Starts and finishes are trimmed before publishing, so the map focuses on routes instead of precise
               doorsteps.
             </p>
+            <p class="inspiration">
+              Made with
+              <a href="https://runmaps.larsheimann.com/" target="_blank" rel="noopener noreferrer">Runmaps</a>
+              by
+              <a href="https://larsheimann.com/" target="_blank" rel="noopener noreferrer">Lars</a>. Inspired by
+              <a href="https://ontracktrain.com/lab/five-million-gps-points" target="_blank" rel="noopener noreferrer">
+                Five Million GPS Points
+              </a>
+              by OnTrackTrain.
+            </p>
+            <div class="profile-links" aria-label="Lars Heimann profile links">
+              <a
+                href="https://larsheimann.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Lars Heimann website"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.93 9h-3.01a15.86 15.86 0 0 0-1.04-5.18A8.04 8.04 0 0 1 18.93 11ZM12 4.04c.84 1.21 1.66 3.54 1.86 6.96H10.14C10.34 7.58 11.16 5.25 12 4.04ZM4.07 13h3.01c.13 1.92.49 3.72 1.04 5.18A8.04 8.04 0 0 1 4.07 13Zm3.01-2H4.07a8.04 8.04 0 0 1 4.05-5.18A15.86 15.86 0 0 0 7.08 11ZM12 19.96c-.84-1.21-1.66-3.54-1.86-6.96h3.72c-.2 3.42-1.02 5.75-1.86 6.96ZM14.29 18.18A15.86 15.86 0 0 0 15.92 13h3.01a8.04 8.04 0 0 1-4.64 5.18Z"
+                  />
+                </svg>
+              </a>
+              <a
+                href="https://github.com/lars-heimann/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Lars Heimann on GitHub"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M12 .5A11.5 11.5 0 0 0 8.36 22.9c.58.11.79-.25.79-.56v-2.02c-3.22.7-3.9-1.38-3.9-1.38-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.2 1.77 1.2 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.57-.29-5.27-1.28-5.27-5.72 0-1.26.45-2.3 1.19-3.11-.12-.29-.52-1.47.11-3.07 0 0 .98-.31 3.18 1.19A10.98 10.98 0 0 1 12 6.05c.98 0 1.97.13 2.89.39 2.2-1.5 3.17-1.19 3.17-1.19.64 1.6.24 2.78.12 3.07.74.81 1.18 1.85 1.18 3.11 0 4.45-2.7 5.43-5.28 5.72.42.36.78 1.07.78 2.16v3.03c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .5Z"
+                  />
+                </svg>
+              </a>
+              <a
+                href="https://www.linkedin.com/in/larsheimann/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Lars Heimann on LinkedIn"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M4.98 3.5C4.98 4.88 3.86 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5ZM.32 8.1h4.35V23H.32V8.1Zm7.04 0h4.16v2.03h.06c.58-1.1 2-2.26 4.12-2.26 4.4 0 5.21 2.9 5.21 6.67V23h-4.34v-7.5c0-1.79-.03-4.09-2.5-4.09-2.5 0-2.88 1.95-2.88 3.96V23H7.36V8.1Z"
+                  />
+                </svg>
+              </a>
+            </div>
           </div>
         </details>
       </section>
@@ -65,7 +110,6 @@
 
     <nav class="controls" aria-label="Visualization controls">
       <button id="playPause" type="button">Pause</button>
-      <button id="replay" type="button">Replay</button>
       <button id="resetView" type="button">Reset view</button>
       <label>
         Time

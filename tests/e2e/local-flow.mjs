@@ -268,7 +268,13 @@ async function main() {
 
     const siteResponse = await fetch(`${server.url}/m/${session.slug}/`);
     assert.equal(siteResponse.status, 200);
-    assert.match(await siteResponse.text(), /Running Footprints/);
+    const viewerHtml = await siteResponse.text();
+    assert.match(viewerHtml, /Running Footprints/);
+    assert.match(viewerHtml, /Five Million GPS Points/);
+    assert.match(viewerHtml, /profile-links/);
+    assert.match(viewerHtml, /id="playPause"/);
+    assert.doesNotMatch(viewerHtml, /id="replay"/);
+    assert.doesNotMatch(viewerHtml, /id="dateRange"/);
 
     const meta = await (await fetch(`${server.url}/m/${session.slug}/meta.json`)).json();
     const points = await (await fetch(`${server.url}/m/${session.slug}/points.bin`)).arrayBuffer();

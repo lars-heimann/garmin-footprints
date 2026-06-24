@@ -16,13 +16,12 @@ const canvas = mustElement("scene", HTMLCanvasElement);
 const errorBox = mustElement("error", HTMLParagraphElement);
 const mapTitleEl = mustElement("mapTitle", HTMLHeadingElement);
 const aboutMapEl = mustElement("aboutMap", HTMLParagraphElement);
+const dateRangeCopyEl = mustElement("dateRangeCopy", HTMLParagraphElement);
 const pointCountEl = mustElement("pointCount", HTMLElement);
 const runCountEl = mustElement("runCount", HTMLElement);
-const dateRangeEl = mustElement("dateRange", HTMLElement);
 const currentDateEl = mustElement("currentDate", HTMLParagraphElement);
 const meterFill = mustElement("meterFill", HTMLSpanElement);
 const playPause = mustElement("playPause", HTMLButtonElement);
-const replay = mustElement("replay", HTMLButtonElement);
 const resetView = mustElement("resetView", HTMLButtonElement);
 const shareMap = mustElement("shareMap", HTMLButtonElement);
 const sharePrompt = mustElement("sharePrompt", HTMLElement);
@@ -271,6 +270,17 @@ function updateHud() {
   timeSlider.value = String(Math.round(state.progress * 1000));
 }
 
+function setPlaybackState(playing) {
+  state.playing = playing;
+  if (state.progress >= 1) {
+    playPause.textContent = "Replay";
+  } else {
+    playPause.textContent = state.playing ? "Pause" : "Play";
+  }
+  state.lastFrame = performance.now();
+  state.needsRender = true;
+}
+
 function resize() {
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
@@ -312,8 +322,7 @@ function frame(now) {
   if (state.playing) {
     state.progress = Math.min(1, state.progress + elapsed / 18000);
     if (state.progress >= 1) {
-      state.playing = false;
-      playPause.textContent = "Play";
+      setPlaybackState(false);
     }
     state.needsRender = true;
   }
@@ -389,18 +398,12 @@ function endPointer(event) {
 
 function bindControls() {
   playPause.addEventListener("click", () => {
-    state.playing = !state.playing;
-    playPause.textContent = state.playing ? "Pause" : "Play";
-    state.lastFrame = performance.now();
-    state.needsRender = true;
-  });
-
-  replay.addEventListener("click", () => {
-    state.progress = 0;
-    state.playing = true;
-    playPause.textContent = "Pause";
-    state.lastFrame = performance.now();
-    state.needsRender = true;
+    if (state.progress >= 1) {
+      state.progress = 0;
+      setPlaybackState(true);
+      return;
+    }
+    setPlaybackState(!state.playing);
   });
 
   resetView.addEventListener("click", resetCamera);
@@ -412,9 +415,7 @@ function bindControls() {
 
   timeSlider.addEventListener("input", () => {
     state.progress = Number(timeSlider.value) / 1000;
-    state.playing = false;
-    playPause.textContent = "Play";
-    state.needsRender = true;
+    setPlaybackState(false);
   });
 
   canvas.addEventListener("pointerdown", (event) => {
@@ -452,6 +453,14 @@ function bindControls() {
       const delta = Math.exp(-event.deltaY * 0.0012);
       state.zoom = Math.max(0.6, Math.min(120, state.zoom * delta));
       state.needsRender = true;
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "gesturestart",
+    (event) => {
+      event.preventDefault();
     },
     { passive: false }
   );
@@ -504,7 +513,7 @@ function applyMetadata() {
     const name = state.meta.displayName;
     aboutMapEl.textContent = `${name}${String(name).toLowerCase().endsWith("s") ? "'" : "'s"} running routes from a Garmin account export. Brighter streets were run more often.`;
   }
-  dateRangeEl.textContent = `${formatMonth(new Date(state.meta.start))} - ${formatMonth(new Date(state.meta.end))}`;
+  dateRangeCopyEl.textContent = `This map covers ${formatMonth(new Date(state.meta.start))} to ${formatMonth(new Date(state.meta.end))}.`;
 }
 
 function initializeGl() {
@@ -542,6 +551,7 @@ async function main() {
     maybeShowSharePrompt();
     initializeGl();
     bindControls();
+    setPlaybackState(true);
     requestAnimationFrame(frame);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));

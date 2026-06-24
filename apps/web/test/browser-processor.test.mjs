@@ -93,6 +93,7 @@ test("browser processor generates viewer-compatible data matching the Python fix
   assert.equal(jsResult.meta.localOnly, true);
   assert.equal(jsResult.meta.pointCount, pythonMeta.pointCount);
   assert.equal(jsResult.meta.parsedRunActivities, pythonMeta.parsedRunActivities);
+  assert.equal(jsResult.meta.runProgress.length, jsResult.meta.parsedRunActivities);
   assert.equal(jsResult.meta.candidateGpsFiles, pythonMeta.candidateGpsFiles);
   assert.equal(jsResult.points.byteLength, jsResult.meta.pointCount * 12);
   assert.equal(jsResult.points.length, pythonPoints.length);
