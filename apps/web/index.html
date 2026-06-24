@@ -11,10 +11,10 @@
       <section class="workspace">
         <div class="intro">
           <p class="eyebrow">Invite-only Garmin map builder</p>
-          <h1>Preview your running footprint map privately, then publish only the result.</h1>
+          <h1>Create a private preview first. Publish only if you like it.</h1>
           <p class="privacy">
-            Your Garmin ZIP never leaves your browser. When you publish, only generated map files are uploaded and the
-            public map expires after 30 days.
+            Your Garmin ZIP never leaves your browser. You do not need an invite code to preview your map. If you choose
+            to share it, publishing uploads only generated map files and the public map expires after 30 days.
           </p>
         </div>
 
@@ -22,14 +22,23 @@
           <section id="errorSummary" class="error-summary" tabindex="-1" hidden></section>
 
           <fieldset>
-            <legend>Garmin export</legend>
+            <legend>Step 1: Private preview</legend>
+            <p class="step-copy">
+              Start here with your Garmin account export ZIP. Everything in this step happens locally in your browser.
+            </p>
             <ol class="guide">
               <li>Log into Garmin Connect.</li>
               <li>Open Garmin's account data export page.</li>
               <li>Request your account export.</li>
-              <li>Garmin may take up to 30 days, but many exports arrive by email in about 15-20 minutes.</li>
+              <li>
+                Garmin emails you when the download is ready. It often takes about 15-20 minutes, but can take up to 30
+                days.
+              </li>
               <li>Download the ZIP Garmin provides and upload it unchanged.</li>
             </ol>
+            <p class="file-example">
+              The ZIP usually has a generated name like <code>a22756ef-76bc-4c8e-9407-5dea56a67a6b_1.zip</code>.
+            </p>
             <div class="action-row">
               <a
                 class="button-link"
@@ -80,9 +89,10 @@
           </fieldset>
 
           <fieldset id="publishFields" class="grid publish-panel" hidden>
-            <legend>Publish map</legend>
+            <legend>Step 2: Publish for sharing</legend>
             <p class="wide publish-copy">
-              Local preview is ready. Publish uploads only generated map files, not your Garmin ZIP.
+              Your preview is ready. Enter your invite code only when you want a shareable public page. Publishing
+              uploads the generated map files, not your Garmin ZIP, and creates a link that works for 30 days.
             </p>
             <label class="wide" for="inviteCode">
               Invite code <span aria-hidden="true">*</span>
@@ -94,9 +104,9 @@
           <input id="turnstileToken" name="turnstileToken" type="hidden" />
 
           <div class="button-row">
-            <button id="previewButton" type="button">Preview locally</button>
+            <button id="previewButton" type="button">Create private preview</button>
             <button id="publishButton" type="button" hidden>Publish map</button>
-            <button id="cancelLocalButton" type="button" hidden>Cancel</button>
+            <button id="cancelLocalButton" type="button" hidden>Cancel preview</button>
             <button id="clearPreviewButton" type="button" hidden>Clear preview</button>
           </div>
         </form>
@@ -104,7 +114,7 @@
 
       <aside class="progress-panel" aria-live="polite">
         <h2>Status</h2>
-        <p id="statusText">Waiting for a Garmin ZIP.</p>
+        <p id="statusText">Waiting for a Garmin ZIP. No invite code is needed for preview.</p>
         <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
         <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
         <a id="deleteLink" hidden target="_blank" rel="noopener noreferrer"></a>
@@ -142,25 +152,33 @@
           <li>Upload the full account export ZIP unchanged.</li>
           <li>Do not upload a single .fit, .gpx, .tcx, Strava export, or a folder you zipped yourself.</li>
         </ol>
-        <div class="placeholder-grid">
-          <figure class="screenshot-placeholder">
-            <div role="img" aria-label="Screenshot placeholder for Garmin Connect login">Garmin Connect login</div>
+        <div class="screenshot-grid">
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-01-login.png" alt="Garmin sign-in page" />
             <figcaption>Sign in to Garmin Connect before requesting your export.</figcaption>
           </figure>
-          <figure class="screenshot-placeholder">
-            <div role="img" aria-label="Screenshot placeholder for Garmin export page">Data export page</div>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-02-export-page.png" alt="Garmin data export page" />
             <figcaption>Open Garmin's account data export page.</figcaption>
           </figure>
-          <figure class="screenshot-placeholder">
-            <div role="img" aria-label="Screenshot placeholder for export request confirmation">Request export</div>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-03-request-sent.png" alt="Garmin export request confirmation" />
             <figcaption>Request your full account export.</figcaption>
           </figure>
-          <figure class="screenshot-placeholder">
-            <div role="img" aria-label="Screenshot placeholder for Garmin export email">Export email</div>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-04-email-ready.png" alt="Garmin export ready email" />
             <figcaption>Garmin emails when the ZIP is ready.</figcaption>
           </figure>
-          <figure class="screenshot-placeholder">
-            <div role="img" aria-label="Screenshot placeholder for correct Garmin ZIP file">Correct ZIP</div>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-05-download-save.png" alt="Browser download bar for the Garmin ZIP" />
+            <figcaption>Download the ZIP from Garmin's email link.</figcaption>
+          </figure>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-06-save-location.png" alt="Save dialog for the Garmin ZIP" />
+            <figcaption>Save the ZIP somewhere you can find it.</figcaption>
+          </figure>
+          <figure class="guide-screenshot">
+            <img src="./assets/garmin-export/step-07-download-complete.png" alt="Completed Garmin ZIP download" />
             <figcaption>Upload the main archive containing <code>DI_CONNECT</code>.</figcaption>
           </figure>
         </div>

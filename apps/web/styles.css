@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-height: 100vh;
   margin: 0;
@@ -196,6 +200,19 @@ legend,
 
 .notice p {
   margin: 0;
+}
+
+.step-copy,
+.file-example {
+  margin: 0 0 0.9rem;
+  color: #4e5d58;
+  line-height: 1.5;
+}
+
+.file-example {
+  border-left: 3px solid #1a7770;
+  padding-left: 0.75rem;
+  font-size: 0.92rem;
 }
 
 .help-section summary {
@@ -429,12 +446,34 @@ button:disabled {
 
 .field-error,
 .field-error input,
-.field-error .file-drop {
+.field-error .file-drop,
+.file-drop.field-error {
   border-color: #dc2626;
+}
+
+.checklist.field-error,
+.turnstile-slot.field-error {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  background: #fff7f7;
+  padding: 0.75rem;
 }
 
 .publish-panel {
   border-top: 1px solid #e3e7dd;
+  border-radius: 8px;
+  background: #f7fbf8;
+  margin-top: 0.35rem;
+  padding: 1rem;
+}
+
+.publish-panel legend {
+  float: left;
+  width: 100%;
+}
+
+.publish-panel .publish-copy {
+  clear: both;
   padding-top: 1rem;
 }
 
@@ -480,19 +519,6 @@ button:disabled {
   padding: 1rem;
 }
 
-.screenshot-placeholder {
-  align-content: center;
-  gap: 0.65rem;
-  min-height: 10rem;
-  padding: 1rem;
-}
-
-.screenshot-placeholder figcaption {
-  color: #586761;
-  font-size: 0.88rem;
-  font-weight: 650;
-}
-
 .guide-shell {
   width: min(52rem, calc(100vw - 2rem));
   grid-template-columns: minmax(0, 52rem);
@@ -517,13 +543,15 @@ button:disabled {
   letter-spacing: 0.08em;
 }
 
-.placeholder-grid {
+.placeholder-grid,
+.screenshot-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.screenshot-placeholder {
+.screenshot-placeholder,
+.guide-screenshot {
   display: grid;
   min-height: 8rem;
   place-items: center;
@@ -533,6 +561,32 @@ button:disabled {
   color: #586761;
   font-weight: 800;
   text-align: center;
+}
+
+.guide-screenshot {
+  overflow: hidden;
+  place-items: stretch;
+  border-style: solid;
+}
+
+.guide-screenshot img {
+  display: block;
+  width: 100%;
+  height: 18rem;
+  object-fit: cover;
+  object-position: top center;
+  background: #ffffff;
+}
+
+.guide-screenshot figcaption,
+.screenshot-placeholder figcaption {
+  margin: 0;
+  border-top: 1px solid #e3e7dd;
+  padding: 0.75rem;
+  color: #586761;
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-align: left;
 }
 
 .doc-page dl {
@@ -561,7 +615,12 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .placeholder-grid {
+  .placeholder-grid,
+  .screenshot-grid {
     grid-template-columns: 1fr;
+  }
+
+  .guide-screenshot img {
+    height: 24rem;
   }
 }

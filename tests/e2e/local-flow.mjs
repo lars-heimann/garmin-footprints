@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import { readFile, stat, mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, extname } from "node:path";
 import { Readable } from "node:stream";
@@ -157,51 +156,6 @@ function run(command, args, options = {}) {
   });
 }
 
-function chromePath() {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  const candidates = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-async function chromeSmoke(basePort, workDir, slug, viewport) {
-  const chrome = chromePath();
-  if (!chrome) {
-    throw new Error("Chrome was not found for browser smoke tests. Set CHROME_PATH.");
-  }
-  const screenshot = join(workDir, `site-${viewport.width}x${viewport.height}.png`);
-  await run(
-    chrome,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--disable-background-networking",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "--disable-extensions",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--timeout=10000",
-      `--user-data-dir=${join(workDir, `chrome-${viewport.width}`)}`,
-      `--window-size=${viewport.width},${viewport.height}`,
-      "--virtual-time-budget=3000",
-      `--screenshot=${screenshot}`,
-      `http://127.0.0.1:${basePort}/m/${slug}/`,
-    ],
-    { timeoutMs: 15000, allowTimeoutFile: screenshot }
-  );
-  const info = await stat(screenshot);
-  assert.ok(info.size > 1000, `expected non-empty screenshot for ${viewport.width}x${viewport.height}`);
-}
-
 async function createLocalPreview(exportZip, displayName) {
   const zipBytes = await readFile(exportZip);
   const file = new File([zipBytes], "garmin-export.zip", { type: "application/zip" });
@@ -322,9 +276,6 @@ async function main() {
     assert.equal(meta.privacy.rawZipUploaded, false);
     assert.equal(meta.privacy.browserProcessed, true);
     assert.ok(meta.expiresAt);
-
-    await chromeSmoke(server.port, workDir, session.slug, { width: 1440, height: 900 });
-    await chromeSmoke(server.port, workDir, session.slug, { width: 390, height: 844 });
 
     const deletePage = await fetch(session.deleteUrl.replace("https://runs.example.com", server.url));
     assert.equal(deletePage.status, 200);

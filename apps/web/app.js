@@ -11,6 +11,7 @@ function mustElement(id, type) {
 }
 
 /** @typedef {{ render(target: HTMLElement, options: Record<string, unknown>): string | number, reset(id: string | number): void }} Turnstile */
+/** @typedef {Error & { apiCode?: string | null }} ApiError */
 /** @type {Window & typeof globalThis & { turnstile?: Turnstile }} */
 const browserWindow = window;
 
@@ -50,9 +51,14 @@ const ERROR_MESSAGES = {
   INVITE_EXHAUSTED: "Invite code has no remaining uses.",
   TURNSTILE_REQUIRED: "Complete the browser check before publishing.",
   TURNSTILE_FAILED: "Browser check failed.",
+  TURNSTILE_UNAVAILABLE: "Browser check could not be verified. Try again in a moment.",
   INVALID_DISPLAY_NAME: "Display name must contain at least 2 letters or numbers.",
   SLUG_GENERATION_FAILED: "Could not reserve a public URL. Try publishing again.",
   ASSET_TOO_LARGE: "Generated map files are larger than allowed.",
+  EMPTY_UPLOAD: "Generated map file was empty. Preview again, then publish.",
+  INVALID_PUBLISH_TOKEN: "This publish session expired. Preview again, then publish.",
+  INVALID_STATUS: "This publish session is no longer accepting files. Preview again, then publish.",
+  LENGTH_REQUIRED: "Generated map file upload was missing its size. Try publishing again.",
   PUBLISH_ASSETS_MISSING: "Generated map files were missing. Preview again, then publish.",
   POINTS_SIZE_MISMATCH: "Generated points file did not match metadata. Preview again, then publish.",
 };
@@ -117,9 +123,11 @@ async function apiFetch(path, options = {}) {
   });
   const payload = await readJson(response);
   if (!response.ok) {
-    throw new Error(
-      ERROR_MESSAGES[payload.errorCode] || payload.errorMessage || payload.errorCode || "Request failed."
+    const error = /** @type {ApiError} */ (
+      new Error(ERROR_MESSAGES[payload.errorCode] || payload.errorMessage || payload.errorCode || "Request failed.")
     );
+    error.apiCode = payload.errorCode || null;
+    throw error;
   }
   return payload;
 }
@@ -204,6 +212,28 @@ function validatePublish() {
   return errors;
 }
 
+function publishErrorTarget(error) {
+  const code =
+    error && typeof error === "object" && "apiCode" in error
+      ? String(/** @type {{ apiCode?: string | null }} */ (error).apiCode || "")
+      : "";
+  if (code === "INVALID_INVITE" || code === "INVITE_EXHAUSTED") return form.inviteCode;
+  if (code.startsWith("TURNSTILE")) return turnstileSlot;
+  return publishButton;
+}
+
+function showPublishFailure(error) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Publishing failed before it finished. Check your connection and try again.";
+  const extra =
+    "Your Garmin ZIP was not uploaded. Invite usage is only consumed after publishing completes successfully.";
+  clearErrors();
+  showErrors([{ message: `${message} ${extra}`, element: publishErrorTarget(error) }]);
+  setStatus(message, 0);
+}
+
 function resetLocalWorker() {
   if (localWorker) {
     localWorker.terminate();
@@ -235,6 +265,7 @@ function renderLocalPreview(meta, points) {
     setStatus("Browser check could not load. Refresh the page and try again.", 0);
   });
   localPreviewFrame.src = "./viewer/index.html";
+  localPreviewPanel.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function processLocally(file) {
@@ -251,8 +282,8 @@ function processLocally(file) {
       }
       if (type === "complete") {
         resetLocalWorker();
-        setStatus("Local preview is ready. Your Garmin ZIP stayed in this browser.", 100);
         renderLocalPreview(meta, points);
+        setStatus("Preview is ready. Check the map below, then publish only if you want to share it.", 100);
         resolve();
         return;
       }
@@ -300,7 +331,7 @@ async function previewLocally() {
     setStatus(error instanceof Error ? error.message : String(error), 0);
   } finally {
     submitting = false;
-    previewButton.textContent = "Preview locally";
+    previewButton.textContent = "Create private preview";
   }
 }
 
@@ -377,7 +408,7 @@ async function publishMap() {
     deleteLink.textContent = "Private delete link";
     resetTurnstile();
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), 0);
+    showPublishFailure(error);
     resetTurnstile();
   } finally {
     submitting = false;
@@ -408,7 +439,7 @@ cancelLocalButton.addEventListener("click", () => {
 });
 clearPreviewButton.addEventListener("click", () => {
   clearPreview();
-  setStatus("Waiting for a Garmin ZIP.", 0);
+  setStatus("Waiting for a Garmin ZIP. No invite code is needed for preview.", 0);
 });
 guideButton.addEventListener("click", () => guideDialog.showModal());
 closeGuideButton.addEventListener("click", () => guideDialog.close());
