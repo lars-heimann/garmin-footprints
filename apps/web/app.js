@@ -152,7 +152,7 @@ function updatePreviewCopy() {
     previewUrlText.textContent = "Public URL preview appears after you enter a display name.";
     return;
   }
-  previewUrlText.textContent = `Preview: ${base}-9dgf2.runmaps.larsheimann.com · ${possessiveTitle(form.displayName.value)}`;
+  previewUrlText.textContent = `Preview: runmaps.larsheimann.com/m/${base}-9dgf2 · ${possessiveTitle(form.displayName.value)}`;
 }
 
 function classifyFileError(file) {

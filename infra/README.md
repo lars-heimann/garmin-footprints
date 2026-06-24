@@ -1,7 +1,11 @@
 # Runmaps Infrastructure
 
 Production is designed for `https://runmaps.larsheimann.com` with generated maps at
-`https://{slug}.runmaps.larsheimann.com`.
+`https://runmaps.larsheimann.com/m/{slug}`.
+
+This path-based URL shape is intentional for the free Cloudflare tier. Deeper wildcard hostnames such as
+`{slug}.runmaps.larsheimann.com` are not covered by Universal SSL for `larsheimann.com` and would require a paid
+certificate feature or a custom certificate.
 
 ## Stacks
 

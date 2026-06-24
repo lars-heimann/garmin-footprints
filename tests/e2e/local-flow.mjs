@@ -191,11 +191,10 @@ async function chromeSmoke(basePort, workDir, slug, viewport) {
       "--no-default-browser-check",
       "--timeout=10000",
       `--user-data-dir=${join(workDir, `chrome-${viewport.width}`)}`,
-      `--host-resolver-rules=MAP ${slug}.runs.example.com 127.0.0.1`,
       `--window-size=${viewport.width},${viewport.height}`,
       "--virtual-time-budget=3000",
       `--screenshot=${screenshot}`,
-      `http://${slug}.runs.example.com:${basePort}/`,
+      `http://127.0.0.1:${basePort}/m/${slug}/`,
     ],
     { timeoutMs: 15000, allowTimeoutFile: screenshot }
   );
@@ -282,7 +281,7 @@ async function main() {
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
     MAINTENANCE_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.example.com",
-    PUBLIC_SITE_URL_PATTERN: "https://{slug}.runs.example.com",
+    PUBLIC_SITE_URL_PATTERN: "https://runs.example.com/m/{slug}",
     DEFAULT_MAX_POINTS: "10000",
   };
 
@@ -307,15 +306,15 @@ async function main() {
     assert.equal(preview.meta.displayName, "E2E Runner");
     assert.equal(preview.meta.privacy.rawZipUploaded, undefined);
 
-    const { session } = await publishPreview(server, "E2E Runner", preview);
-    const hostHeaders = { "X-Test-Host": `${session.slug}.runs.example.com` };
+    const { session, complete } = await publishPreview(server, "E2E Runner", preview);
+    assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}`);
 
-    const siteResponse = await fetch(`${server.url}/`, { headers: hostHeaders });
+    const siteResponse = await fetch(`${server.url}/m/${session.slug}/`);
     assert.equal(siteResponse.status, 200);
     assert.match(await siteResponse.text(), /Running Footprints/);
 
-    const meta = await (await fetch(`${server.url}/meta.json`, { headers: hostHeaders })).json();
-    const points = await (await fetch(`${server.url}/points.bin`, { headers: hostHeaders })).arrayBuffer();
+    const meta = await (await fetch(`${server.url}/m/${session.slug}/meta.json`)).json();
+    const points = await (await fetch(`${server.url}/m/${session.slug}/points.bin`)).arrayBuffer();
     assert.equal(points.byteLength, meta.pointCount * 12);
     assert.equal(meta.displayName, "E2E Runner");
     assert.equal(meta.slug, session.slug);
@@ -327,23 +326,17 @@ async function main() {
     await chromeSmoke(server.port, workDir, session.slug, { width: 1440, height: 900 });
     await chromeSmoke(server.port, workDir, session.slug, { width: 390, height: 844 });
 
-    const deletePage = await fetch(
-      session.deleteUrl.replace("https://", `${server.url}/`).replace(".runs.example.com", ""),
-      {
-        headers: { "X-Test-Host": "runs.example.com" },
-      }
-    );
+    const deletePage = await fetch(session.deleteUrl.replace("https://runs.example.com", server.url));
     assert.equal(deletePage.status, 200);
     assert.match(await deletePage.text(), /Delete E2E Runner/);
 
     const deletePath = new URL(session.deleteUrl).pathname;
     const deleteResponse = await fetch(`${server.url}/api${deletePath}`, {
       method: "POST",
-      headers: { "X-Test-Host": "runs.example.com" },
     });
     assert.equal(deleteResponse.status, 200);
     assert.equal(bucket.has(`sites/${session.slug}/meta.json`), false);
-    const deletedSite = await fetch(`${server.url}/`, { headers: hostHeaders });
+    const deletedSite = await fetch(`${server.url}/m/${session.slug}/`);
     assert.equal(deletedSite.status, 410);
 
     const secondPreview = await createLocalPreview(exportZip, "Expiry Runner");
@@ -352,9 +345,7 @@ async function main() {
     expiryJob.expiresAt = new Date(Date.now() - 60_000).toISOString();
     await reapStaleJobs(env, Date.now());
     assert.equal(bucket.has(`sites/${expirySession.slug}/meta.json`), false);
-    const expiredSite = await fetch(`${server.url}/`, {
-      headers: { "X-Test-Host": `${expirySession.slug}.runs.example.com` },
-    });
+    const expiredSite = await fetch(`${server.url}/m/${expirySession.slug}/`);
     assert.equal(expiredSite.status, 410);
   } finally {
     await server.close();

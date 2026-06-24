@@ -22,7 +22,7 @@ async function makeEnv(invites = [["ALPHA-1", 2, "Alpha group"]]) {
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
     MAINTENANCE_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.example.com",
-    PUBLIC_SITE_URL_PATTERN: "https://{slug}.runs.example.com",
+    PUBLIC_SITE_URL_PATTERN: "https://runs.example.com/m/{slug}",
     DEFAULT_MAX_POINTS: "250000",
   };
 }
@@ -146,6 +146,7 @@ test("publishes only derived assets and consumes invite on completion", async ()
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { session, complete } = await publishReady(env, waitContext());
   assert.equal(complete.status, "ready");
+  assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}`);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
 
@@ -188,18 +189,12 @@ test("serves shared viewer and data for a published map", async () => {
   };
   const { session } = await publishReady(env, waitContext());
 
-  const index = await worker.fetch(
-    new Request(`https://${session.slug}.runs.example.com/`, { headers: { Host: `${session.slug}.runs.example.com` } }),
-    env,
-    waitContext()
-  );
+  const index = await worker.fetch(new Request(`https://runs.example.com/m/${session.slug}/`), env, waitContext());
   assert.equal(index.status, 200);
   assert.match(await index.text(), /asset:\/viewer\/index\.html/);
 
   const meta = await worker.fetch(
-    new Request(`https://${session.slug}.runs.example.com/meta.json`, {
-      headers: { Host: `${session.slug}.runs.example.com` },
-    }),
+    new Request(`https://runs.example.com/m/${session.slug}/meta.json`),
     env,
     waitContext()
   );

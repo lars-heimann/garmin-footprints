@@ -3,7 +3,11 @@
 Production targets:
 
 - Upload app: `https://runmaps.larsheimann.com`
-- Generated maps: `https://{slug}.runmaps.larsheimann.com`
+- Generated maps: `https://runmaps.larsheimann.com/m/{slug}`
+
+Generated maps use paths instead of wildcard subdomains so the deployment stays inside Cloudflare's free Universal SSL
+coverage. A deeper hostname such as `{slug}.runmaps.larsheimann.com` would require paid Advanced Certificate Manager,
+Total TLS, or a custom certificate.
 
 ## Automated Path
 
@@ -21,8 +25,8 @@ OpenTofu provisions:
 - private R2 app bucket `runmaps-app`
 - private R2 state bucket
 - D1 database `runmaps`
-- DNS records for `runmaps.larsheimann.com` and `*.runmaps.larsheimann.com`
-- Worker routes for root and wildcard hostnames
+- DNS record for `runmaps.larsheimann.com`
+- Worker route for the root hostname
 - generated secrets for invite hashing, publish/delete tokens, and maintenance auth
 - GitHub Actions variables/secrets used by deploy, invite, and reaper workflows
 

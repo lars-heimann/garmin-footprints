@@ -5,7 +5,7 @@ Invite-only Runmaps web app for turning a Garmin account export into a shareable
 ## Shape
 
 - `apps/web` - browser-first upload, local preview, publish, and guide UI
-- `apps/worker` - Cloudflare Worker API, D1 metadata, R2 derived-map storage, and wildcard map serving
+- `apps/worker` - Cloudflare Worker API, D1 metadata, R2 derived-map storage, and public map serving
 - `apps/web/browser-processing` - browser Garmin export parser and map-data generator
 - `apps/web/viewer` - reusable public map viewer served for every published slug
 - `processor` - standalone Python processor kept for parser parity tests and local CLI usage
@@ -17,7 +17,7 @@ Invite-only Runmaps web app for turning a Garmin account export into a shareable
 npm test
 ```
 
-The e2e tests exercise local browser ZIP processing without backend upload, publish only derived files through the Worker, fetch the generated wildcard map, verify deletion/expiry behavior, and confirm raw ZIP upload endpoints are unavailable.
+The e2e tests exercise local browser ZIP processing without backend upload, publish only derived files through the Worker, fetch the generated public map, verify deletion/expiry behavior, and confirm raw ZIP upload endpoints are unavailable.
 
 ## Quality
 
@@ -46,9 +46,9 @@ Run the app locally with an in-memory Worker/R2/D1 harness:
 npm run dev:local
 ```
 
-Open `http://127.0.0.1:8787/` and use invite code `LOCAL-DEMO` only when publishing. Local preview does not need an invite code. Local share URLs use `http://{slug}.runs.localhost:8787/`.
+Open `http://127.0.0.1:8787/` and use invite code `LOCAL-DEMO` only when publishing. Local preview does not need an invite code. Local share URLs use `http://127.0.0.1:8787/m/{slug}`.
 
-The Worker reserves server-authoritative slugs, accepts only generated `meta.json` and `points.bin`, serves public wildcard map hostnames from R2, supports confirmation-based delete links, and expires maps after 30 days.
+The Worker reserves server-authoritative slugs, accepts only generated `meta.json` and `points.bin`, serves public map paths from R2, supports confirmation-based delete links, and expires maps after 30 days.
 
 ## Production
 

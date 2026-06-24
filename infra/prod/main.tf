@@ -1,8 +1,7 @@
 locals {
-  public_site_url_pattern = "https://{slug}.${var.domain}"
+  public_site_url_pattern = "https://${var.domain}/m/{slug}"
   worker_api_base         = "https://${var.domain}"
   dns_record_name         = trimsuffix(var.domain, ".${var.zone_name}")
-  wildcard_record_name    = "*.${local.dns_record_name}"
 }
 
 resource "cloudflare_r2_bucket" "app" {
@@ -38,26 +37,10 @@ resource "cloudflare_dns_record" "root" {
   ttl     = 1
 }
 
-resource "cloudflare_dns_record" "wildcard" {
-  zone_id = var.cloudflare_zone_id
-  name    = local.wildcard_record_name
-  type    = "AAAA"
-  content = "100::"
-  proxied = true
-  ttl     = 1
-}
-
 resource "cloudflare_workers_route" "root" {
   count   = var.create_worker_routes ? 1 : 0
   zone_id = var.cloudflare_zone_id
   pattern = "${var.domain}/*"
-  script  = cloudflare_worker.app.name
-}
-
-resource "cloudflare_workers_route" "wildcard" {
-  count   = var.create_worker_routes ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  pattern = "*.${var.domain}/*"
   script  = cloudflare_worker.app.name
 }
 

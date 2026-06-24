@@ -48,7 +48,7 @@ Publishing requires:
 - derived `points.bin` within the Worker limit
 - byte-length consistency between `meta.json.pointCount` and `points.bin`
 
-The Worker generates slugs as `{normalized-display-name}-{5-char-random}`. Users never submit a public slug directly. The Worker retries slug collisions server-side and blocks exact reserved slug hostnames.
+The Worker generates slugs as `{normalized-display-name}-{5-char-random}`. Users never submit a public slug directly. Public maps are served at `https://runmaps.larsheimann.com/m/{slug}` so the app stays on Cloudflare's free Universal SSL coverage. The Worker retries slug collisions server-side and blocks exact reserved slug names.
 
 ## Invite Tracking
 

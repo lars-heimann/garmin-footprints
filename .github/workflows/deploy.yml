@@ -131,8 +131,7 @@ jobs:
       - name: OpenTofu apply Worker routes
         run: |
           tofu -chdir=infra/prod apply -auto-approve -refresh=false \
-            -target=cloudflare_workers_route.root \
-            -target=cloudflare_workers_route.wildcard
+            -target=cloudflare_workers_route.root
 
       - name: Production smoke test
         run: |

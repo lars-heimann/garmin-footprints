@@ -30,7 +30,7 @@
   ],
   "vars": {
     "PUBLIC_HOST_SUFFIX": "runmaps.larsheimann.com",
-    "PUBLIC_SITE_URL_PATTERN": "https://{slug}.runmaps.larsheimann.com",
+    "PUBLIC_SITE_URL_PATTERN": "https://runmaps.larsheimann.com/m/{slug}",
     "R2_ACCOUNT_ID": "local",
     "R2_BUCKET_NAME": "runmaps-app",
     "MAX_ZIP_BYTES": "1073741824",

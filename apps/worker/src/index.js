@@ -66,6 +66,10 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     if (deleteMatch) {
       return await handleDeletePage(request, env, deleteMatch[1]);
     }
+    const publicMapMatch = publicMapPath(url.pathname);
+    if (publicMapMatch) {
+      return await serveGeneratedSite(request, env, publicMapMatch.slug, publicMapMatch.assetPath);
+    }
 
     const siteSlug = slugFromHost(request.headers.get("Host") || url.host, env.PUBLIC_HOST_SUFFIX);
     if (siteSlug) {
@@ -482,9 +486,9 @@ async function getPublicJob(env, jobId) {
   });
 }
 
-async function serveGeneratedSite(request, env, slug) {
+async function serveGeneratedSite(request, env, slug, assetPath = null) {
   const url = new URL(request.url);
-  const path = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+  const path = assetPath || (url.pathname === "/" ? "index.html" : url.pathname.slice(1));
   const job = await getStore(env).getJobBySlug(slug);
   if (!job) {
     return new Response("Not found", { status: 404 });
@@ -841,7 +845,15 @@ function siteUrlForSlug(slug, env) {
   if (env.PUBLIC_SITE_URL_PATTERN) {
     return String(env.PUBLIC_SITE_URL_PATTERN).replaceAll("{slug}", slug);
   }
-  return `https://${slug}.${env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX}`;
+  return `https://${env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX}/m/${slug}`;
+}
+
+function publicMapPath(pathname) {
+  const match = pathname.match(/^\/m\/([^/]+)(?:\/(.*))?$/);
+  if (!match || !isValidSlug(match[1])) return null;
+  const assetPath = match[2] || "index.html";
+  if (assetPath === "") return { slug: match[1], assetPath: "index.html" };
+  return { slug: match[1], assetPath };
 }
 
 function slugFromHost(hostHeader, suffix = DEFAULT_PUBLIC_HOST_SUFFIX) {
