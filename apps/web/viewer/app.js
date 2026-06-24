@@ -170,6 +170,15 @@ function maybeShowSharePrompt() {
   }
 }
 
+function dismissSharePrompt() {
+  if (sharePrompt.hidden) return;
+  sharePrompt.classList.add("is-dismissing");
+  window.setTimeout(() => {
+    sharePrompt.hidden = true;
+    sharePrompt.classList.remove("is-dismissing");
+  }, 240);
+}
+
 function compileShader(gl, type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -409,9 +418,7 @@ function bindControls() {
   resetView.addEventListener("click", resetCamera);
   shareMap.addEventListener("click", shareCurrentMap);
   sharePromptButton.addEventListener("click", shareCurrentMap);
-  closeSharePrompt.addEventListener("click", () => {
-    sharePrompt.hidden = true;
-  });
+  closeSharePrompt.addEventListener("click", dismissSharePrompt);
 
   timeSlider.addEventListener("input", () => {
     state.progress = Number(timeSlider.value) / 1000;
