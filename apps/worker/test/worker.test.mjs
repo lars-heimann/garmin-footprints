@@ -159,6 +159,43 @@ test("publishes only derived assets and consumes invite on completion", async ()
   assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
 });
 
+test("uploads generated assets to R2 as fixed buffers, not transformed streams", async () => {
+  const env = await makeEnv([["ALPHA-1", 1, "Alpha group"]]);
+  const writes = new Map();
+  const firstWriteKinds = new Map();
+  env.__TEST_BUCKET = /** @type {any} */ ({
+    async put(key, value, options) {
+      assert.ok(!(value instanceof ReadableStream), "R2 asset uploads should not use transformed streams");
+      if (!firstWriteKinds.has(key)) {
+        assert.ok(value instanceof ArrayBuffer, "R2 asset uploads should use bounded ArrayBuffer bodies");
+        firstWriteKinds.set(key, "arrayBuffer");
+      }
+      const body =
+        value instanceof ArrayBuffer
+          ? value
+          : new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value)).buffer;
+      writes.set(key, { body, contentType: options?.httpMetadata?.contentType });
+    },
+    async get(key) {
+      const item = writes.get(key);
+      if (!item) return null;
+      return {
+        body: new Blob([item.body]).stream(),
+        arrayBuffer: async () => item.body,
+        writeHttpMetadata() {},
+      };
+    },
+    async delete() {},
+  });
+
+  const { session, complete } = await publishReady(env, waitContext());
+  assert.equal(complete.status, "ready");
+  assert.equal(firstWriteKinds.get(`sites/${session.slug}/meta.json`), "arrayBuffer");
+  assert.equal(firstWriteKinds.get(`sites/${session.slug}/points.bin`), "arrayBuffer");
+  assert.equal(writes.get(`sites/${session.slug}/meta.json`)?.contentType, "application/json; charset=utf-8");
+  assert.equal(writes.get(`sites/${session.slug}/points.bin`)?.contentType, "application/octet-stream");
+});
+
 test("normalizes display names and retries generated slug collisions", async () => {
   const env = await makeEnv([["ALPHA-1", 2, "Alpha group"]]);
   let attempts = 0;

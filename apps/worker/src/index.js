@@ -286,19 +286,31 @@ async function uploadPublishedAsset(request, env, jobId, assetName) {
   if (!request.body) {
     return errorResponse("EMPTY_UPLOAD", "Generated map file body is required.", 400);
   }
+  let body;
   try {
-    await getBucket(env).put(
-      `sites/${job.slug}/${assetName}`,
-      limitStreamBytes(request.body, maxAssetBytes(assetName), "ASSET_TOO_LARGE"),
-      { httpMetadata: { contentType: contentTypeForPath(assetName) } }
-    );
-  } catch (error) {
-    if (isStreamLimitError(error, "ASSET_TOO_LARGE")) {
-      await getBucket(env)
-        .delete(`sites/${job.slug}/${assetName}`)
-        .catch(() => {});
+    body = await request.arrayBuffer();
+    if (body.byteLength <= 0) {
+      return errorResponse("EMPTY_UPLOAD", "Generated map file body is required.", 400);
+    }
+    if (body.byteLength > maxAssetBytes(assetName)) {
       return errorResponse("ASSET_TOO_LARGE", "Generated map file is larger than allowed.", 413);
     }
+    await getBucket(env).put(`sites/${job.slug}/${assetName}`, body, {
+      httpMetadata: { contentType: contentTypeForPath(assetName) },
+    });
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "published asset put failed",
+        jobId: job.jobId,
+        assetName,
+        contentLength,
+        bodyBytes: body?.byteLength || null,
+        detail: String(error),
+        stack: error?.stack,
+      })
+    );
     throw error;
   }
   return jsonResponse({ ok: true, jobId: job.jobId, assetName });
@@ -806,39 +818,6 @@ function requiredSecret(env, name, localFallback) {
 
 function bearerToken(request) {
   return (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
-}
-
-function limitStreamBytes(stream, maxBytes, errorCode) {
-  let seen = 0;
-  return stream.pipeThrough(
-    new TransformStream({
-      transform(chunk, controller) {
-        seen += chunkByteLength(chunk);
-        if (seen > maxBytes) {
-          controller.error(new Error(errorCode));
-          return;
-        }
-        controller.enqueue(chunk);
-      },
-    })
-  );
-}
-
-function chunkByteLength(chunk) {
-  if (chunk instanceof Uint8Array) {
-    return chunk.byteLength;
-  }
-  if (typeof chunk === "string") {
-    return new TextEncoder().encode(chunk).byteLength;
-  }
-  if (chunk?.byteLength) {
-    return Number(chunk.byteLength);
-  }
-  return 0;
-}
-
-function isStreamLimitError(error, code) {
-  return error instanceof Error && error.message === code;
 }
 
 function siteUrlForSlug(slug, env) {
