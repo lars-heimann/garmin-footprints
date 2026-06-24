@@ -50,6 +50,16 @@ Open `http://127.0.0.1:8787/` and use invite code `LOCAL-DEMO` only when publish
 
 The Worker reserves server-authoritative slugs, accepts only generated `meta.json` and `points.bin`, serves public map paths from R2, supports confirmation-based delete links, and expires maps after 30 days.
 
+## Personal Runs Pages Preview
+
+`runs.larsheimann.com` is being migrated safely into this repo as a GitHub Pages preview. The Runmaps-owned preview uses the shared viewer plus committed derived map data from `sites/runs`; it does not contain raw Garmin exports.
+
+```sh
+npm run test:runs-pages
+```
+
+The preview workflow does not write a `CNAME` file and does not claim `runs.larsheimann.com`. The current visualizer repo and live custom domain stay untouched until the default GitHub Pages preview has been inspected and manually approved.
+
 ## Production
 
 Production launch is driven by OpenTofu plus GitHub Actions. See [docs/deployment.md](docs/deployment.md), [docs/browser-first-sharing.md](docs/browser-first-sharing.md), and [infra/README.md](infra/README.md).

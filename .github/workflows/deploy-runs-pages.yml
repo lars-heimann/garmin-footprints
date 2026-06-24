@@ -1,0 +1,50 @@
+name: Deploy Runs Pages Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/viewer/**"
+      - "sites/runs/**"
+      - "scripts/build-runs-pages.mjs"
+      - ".github/workflows/deploy-runs-pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: runs-pages-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and validate runs Pages artifact
+        run: npm run test:runs-pages
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/runs-pages
+          include-hidden-files: true
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
