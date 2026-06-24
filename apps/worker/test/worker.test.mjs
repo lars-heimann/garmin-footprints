@@ -5,493 +5,310 @@ import { MemoryBucket, MemoryStore } from "../src/testing.js";
 
 const INVITE_SECRET = "test-invite-secret";
 const UPLOAD_SECRET = "test-upload-secret";
-const PROCESSOR_TOKEN = "processor-token";
-const ZIP_TEXT = "zip-data";
-const ZIP_SIZE = Buffer.byteLength(ZIP_TEXT);
+const MAINTENANCE_TOKEN = "maintenance-token";
 
 /**
- * @param {Array<[string, number]>} invites
+ * @param {Array<[string, number, string]>} invites
  */
-async function makeEnv(invites = [["ALPHA-1", 1]]) {
+async function makeEnv(invites = [["ALPHA-1", 2, "Alpha group"]]) {
   const store = new MemoryStore();
-  for (const [code, maxUses] of invites) {
-    store.addInvite(await hashInviteCode(code, INVITE_SECRET), maxUses);
+  for (const [code, maxUses, label] of invites) {
+    store.addInvite(await hashInviteCode(code, INVITE_SECRET), maxUses, label);
   }
   return {
     __TEST_STORE: store,
     __TEST_BUCKET: new MemoryBucket(),
-    __TEST_R2_UPLOAD_BASE: "https://r2.example.com",
     INVITE_HASH_SECRET: INVITE_SECRET,
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
-    PROCESSOR_TOKEN,
+    MAINTENANCE_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.example.com",
-    MAX_ZIP_BYTES: "32",
+    PUBLIC_SITE_URL_PATTERN: "https://{slug}.runs.example.com",
     DEFAULT_MAX_POINTS: "250000",
   };
 }
 
 function waitContext() {
-  const pending = [];
-  return {
-    pending,
-    ctx: {
-      waitUntil(promise) {
-        pending.push(promise);
-      },
-    },
-  };
+  return { waitUntil() {} };
 }
 
 async function json(response) {
   return response.json();
 }
 
-function sessionPayload(overrides = {}) {
-  return {
-    inviteCode: "ALPHA-1",
-    slug: "runner",
-    fileSize: ZIP_SIZE,
-    ...overrides,
-  };
+function publishPayload(overrides = {}) {
+  return { inviteCode: "ALPHA-1", displayName: "Lárs Heimann!", ...overrides };
 }
 
-async function createSession(env, ctx, overrides = {}) {
+async function createPublishSession(env, ctx, overrides = {}) {
   return worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
+    new Request("https://runs.example.com/api/publish-sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(sessionPayload(overrides)),
+      body: JSON.stringify(publishPayload(overrides)),
     }),
     env,
     ctx
   );
 }
 
-async function uploadPartToMemoryBucket(env, session, partNumber = 1, body = ZIP_TEXT) {
-  const job = env.__TEST_STORE.jobs.get(session.jobId);
-  const upload = env.__TEST_BUCKET.resumeMultipartUpload(job.uploadKey, job.uploadId);
-  return upload.uploadPart(partNumber, body);
+function validMeta(pointCount = 2) {
+  return JSON.stringify({
+    generatedAt: "2026-06-24T00:00:00.000Z",
+    slug: "local-preview",
+    displayName: "Local",
+    viewerTitle: "Local's Running Footprints",
+    pointCount,
+    parsedRunActivities: 1,
+    start: "2024-01-01T00:00:00.000Z",
+    end: "2024-01-02T00:00:00.000Z",
+    localOnly: true,
+  });
 }
 
-async function completeTestUpload(env, ctx, session, body = ZIP_TEXT) {
-  const part = await uploadPartToMemoryBucket(env, session, 1, body);
+function validPoints(pointCount = 2) {
+  return Buffer.alloc(pointCount * 12);
+}
+
+async function uploadAsset(env, ctx, session, name, body, type = "application/octet-stream") {
   return worker.fetch(
-    new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ size: Buffer.byteLength(body), parts: [part] }),
+    new Request(`https://runs.example.com${session.assetUrls[name]}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${session.publishToken}`,
+        "Content-Type": type,
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
     }),
     env,
     ctx
   );
 }
 
-test("exposes public upload configuration", async () => {
+async function publishReady(env, ctx, overrides = {}) {
+  const session = await json(await createPublishSession(env, ctx, overrides));
+  assert.match(session.slug, /^[a-z0-9-]+-[a-z0-9]{5}$/);
+  assert.match(session.deleteUrl, /^https:\/\/runs\.example\.com\/delete\//);
+  assert.equal((await uploadAsset(env, ctx, session, "meta.json", validMeta(), "application/json")).status, 200);
+  assert.equal((await uploadAsset(env, ctx, session, "points.bin", validPoints())).status, 200);
+  const complete = await worker.fetch(
+    new Request(`https://runs.example.com/api/publish-sessions/${session.jobId}/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.publishToken}`, "Content-Type": "application/json" },
+      body: "{}",
+    }),
+    env,
+    ctx
+  );
+  assert.equal(complete.status, 200);
+  return { session, complete: await json(complete) };
+}
+
+test("exposes browser-first public configuration", async () => {
   const env = await makeEnv();
   env.TURNSTILE_SITE_KEY = "site-key";
-  const response = await worker.fetch(new Request("https://runs.example.com/api/config"), env, waitContext().ctx);
+  const response = await worker.fetch(new Request("https://runs.example.com/api/config"), env, waitContext());
   assert.equal(response.status, 200);
   const config = await json(response);
   assert.equal(config.turnstileSiteKey, "site-key");
-  assert.equal(config.maxZipBytes, 32);
+  assert.equal(config.localMaxZipBytes, 500 * 1024 * 1024);
+  assert.equal(config.maxZipBytes, 500 * 1024 * 1024);
   assert.equal(config.publicHostSuffix, "runs.example.com");
-
-  env.ASSETS = { fetch: async () => new Response("<!doctype html>", { headers: { "Content-Type": "text/html" } }) };
-  const page = await worker.fetch(new Request("https://runs.example.com/"), env, waitContext().ctx);
-  const csp = page.headers.get("Content-Security-Policy") || "";
-  assert.match(csp, /frame-src 'self' https:\/\/challenges\.cloudflare\.com/);
-  assert.match(csp, /frame-ancestors 'self'/);
 });
 
-test("rejects invalid invites and reserved slugs", async () => {
+test("rejects invalid invites and invalid display names", async () => {
   const env = await makeEnv();
-
-  const badInvite = await createSession(env, waitContext().ctx, { inviteCode: "wrong" });
+  const badInvite = await createPublishSession(env, waitContext(), { inviteCode: "wrong" });
   assert.equal(badInvite.status, 403);
 
-  const reservedSlug = await createSession(env, waitContext().ctx, { slug: "admin" });
-  assert.equal(reservedSlug.status, 400);
+  const badName = await createPublishSession(env, waitContext(), { displayName: "!" });
+  assert.equal(badName.status, 400);
 });
 
 test("requires Turnstile when configured", async () => {
   const env = await makeEnv();
   env.TURNSTILE_SECRET_KEY = "turnstile-secret";
 
-  const missing = await createSession(env, waitContext().ctx);
+  const missing = await createPublishSession(env, waitContext());
   assert.equal(missing.status, 400);
 
   env.__TEST_TURNSTILE_RESULT = { ok: false };
-  const failed = await createSession(env, waitContext().ctx, { turnstileToken: "bad-token" });
+  const failed = await createPublishSession(env, waitContext(), { turnstileToken: "bad-token" });
   assert.equal(failed.status, 403);
 
   env.__TEST_TURNSTILE_RESULT = { ok: true };
-  const passed = await createSession(env, waitContext().ctx, { turnstileToken: "ok-token" });
+  const passed = await createPublishSession(env, waitContext(), { turnstileToken: "ok-token" });
   assert.equal(passed.status, 200);
 });
 
-test("reserves slugs and invite capacity until multipart completion consumes the invite", async () => {
-  const env = await makeEnv([
-    ["ALPHA-1", 1],
-    ["BETA-2", 2],
-  ]);
+test("publishes only derived assets and consumes invite on completion", async () => {
+  const env = await makeEnv([["ALPHA-1", 1, "Alpha group"]]);
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
-  const { ctx, pending } = waitContext();
-
-  const first = await createSession(env, ctx, { displayName: "Runner" });
-  assert.equal(first.status, 200);
-  const firstSession = await json(first);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 1);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
-
-  const exhaustedWhileReserved = await createSession(env, ctx, { slug: "runner-two" });
-  assert.equal(exhaustedWhileReserved.status, 403);
-
-  const duplicateSlug = await createSession(env, ctx, { inviteCode: "BETA-2", slug: "runner" });
-  assert.equal(duplicateSlug.status, 409);
-
-  const completed = await completeTestUpload(env, ctx, firstSession);
-  assert.equal(completed.status, 200);
-  await Promise.all(pending);
+  const { session, complete } = await publishReady(env, waitContext());
+  assert.equal(complete.status, "ready");
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
 
-  const exhaustedAfterCompletion = await createSession(env, ctx, { slug: "runner-three" });
-  assert.equal(exhaustedAfterCompletion.status, 403);
+  const job = env.__TEST_STORE.jobs.get(session.jobId);
+  assert.equal(job.status, "ready");
+  assert.ok(job.expiresAt);
+  assert.ok(job.publishedAt);
+  assert.equal(env.__TEST_BUCKET.has(`sites/${session.slug}/meta.json`), true);
+  assert.equal(env.__TEST_BUCKET.has(`sites/${session.slug}/points.bin`), true);
+  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
 });
 
-test("creates multipart sessions, signs part URLs, completes uploads, and exposes queued status", async () => {
-  const env = await makeEnv();
-  const { ctx, pending } = waitContext();
-  const sessionResponse = await createSession(env, ctx, { displayName: "Runner" });
-  assert.equal(sessionResponse.status, 200);
-  const session = await json(sessionResponse);
-  assert.equal(session.uploadMode, "r2-multipart");
-  assert.equal(session.partSizeBytes, 16 * 1024 * 1024);
-  assert.equal(session.maxZipBytes, 32);
-  assert.ok(session.uploadToken);
-  assert.ok(session.expiresAt);
-  assert.equal(session.siteUrl, "https://runner.runs.example.com");
+test("normalizes display names and retries generated slug collisions", async () => {
+  const env = await makeEnv([["ALPHA-1", 2, "Alpha group"]]);
+  let attempts = 0;
+  const originalReserveSlug = env.__TEST_STORE.reserveSlug.bind(env.__TEST_STORE);
+  env.__TEST_STORE.reserveSlug = async (slug, jobId, createdAt) => {
+    attempts += 1;
+    if (attempts === 1) return false;
+    return originalReserveSlug(slug, jobId, createdAt);
+  };
 
-  const signed = await worker.fetch(
-    new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ partNumbers: [1] }),
-    }),
-    env,
-    ctx
-  );
-  assert.equal(signed.status, 200);
-  const signedPayload = await json(signed);
-  assert.equal(signedPayload.urls[0].partNumber, 1);
-  assert.match(signedPayload.urls[0].url, /^https:\/\/r2\.example\.com\/__r2\//);
+  const { session } = await publishReady(env, waitContext(), { displayName: "Lárs Heimann" });
+  assert.match(session.slug, /^lars-heimann-[a-z0-9]{5}$/);
+  assert.ok(attempts >= 2);
 
-  const completed = await completeTestUpload(env, ctx, session);
-  assert.equal(completed.status, 200);
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), true);
-  await Promise.all(pending);
-
-  const status = await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx);
-  const job = await json(status);
-  assert.equal(job.status, "queued");
-
-  const replay = await worker.fetch(
-    new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        size: ZIP_SIZE,
-        parts: [{ partNumber: 1, etag: `"${String(1).padStart(32, "0")}"` }],
-      }),
-    }),
-    env,
-    ctx
-  );
-  assert.equal(replay.status, 200);
-  assert.equal((await json(replay)).status, "queued");
+  const meta = JSON.parse(await env.__TEST_BUCKET.text(`sites/${session.slug}/meta.json`));
+  assert.equal(meta.viewerTitle, "Lárs Heimann's Running Footprints");
 });
 
-test("rejects sessions that omit file size or exceed the configured ZIP limit", async () => {
+test("serves shared viewer and data for a published map", async () => {
   const env = await makeEnv();
+  env.ASSETS = {
+    fetch: async (request) => {
+      const path = new URL(request.url).pathname;
+      return new Response(`asset:${path}`, {
+        headers: { "Content-Type": path.endsWith(".css") ? "text/css" : "text/html" },
+      });
+    },
+  };
+  const { session } = await publishReady(env, waitContext());
+
+  const index = await worker.fetch(
+    new Request(`https://${session.slug}.runs.example.com/`, { headers: { Host: `${session.slug}.runs.example.com` } }),
+    env,
+    waitContext()
+  );
+  assert.equal(index.status, 200);
+  assert.match(await index.text(), /asset:\/viewer\/index\.html/);
+
+  const meta = await worker.fetch(
+    new Request(`https://${session.slug}.runs.example.com/meta.json`, {
+      headers: { Host: `${session.slug}.runs.example.com` },
+    }),
+    env,
+    waitContext()
+  );
+  assert.equal(meta.status, 200);
+  const metaPayload = await json(meta);
+  assert.equal(metaPayload.slug, session.slug);
+  assert.equal(metaPayload.localOnly, false);
+  assert.equal(metaPayload.privacy.rawZipUploaded, false);
+});
+
+test("reserved wildcard hosts do not serve the upload app", async () => {
+  const env = await makeEnv();
+  env.ASSETS = { fetch: async () => new Response("upload app") };
+  const response = await worker.fetch(
+    new Request("https://admin.runs.example.com/", { headers: { Host: "admin.runs.example.com" } }),
+    env,
+    waitContext()
+  );
+  assert.equal(response.status, 404);
+});
+
+test("rejects malformed generated assets and releases invite reservation", async () => {
+  const env = await makeEnv([["ALPHA-1", 1, "Alpha group"]]);
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
-  const { ctx } = waitContext();
-
-  const missingSize = await worker.fetch(
-    new Request("https://runs.example.com/api/upload-sessions", {
+  const session = await json(await createPublishSession(env, waitContext()));
+  assert.equal(
+    (await uploadAsset(env, waitContext(), session, "meta.json", validMeta(3), "application/json")).status,
+    200
+  );
+  assert.equal((await uploadAsset(env, waitContext(), session, "points.bin", validPoints(2))).status, 200);
+  const complete = await worker.fetch(
+    new Request(`https://runs.example.com/api/publish-sessions/${session.jobId}/complete`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inviteCode: "ALPHA-1", slug: "runner" }),
+      headers: { Authorization: `Bearer ${session.publishToken}`, "Content-Type": "application/json" },
+      body: "{}",
     }),
     env,
-    ctx
+    waitContext()
   );
-  assert.equal(missingSize.status, 400);
-
-  const tooLarge = await createSession(env, ctx, { fileSize: 33 });
-  assert.equal(tooLarge.status, 413);
+  assert.equal(complete.status, 400);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 0);
 });
 
-test("rejects invalid part URL requests", async () => {
+test("delete link opens confirmation and POST deletion is idempotent", async () => {
   const env = await makeEnv();
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
+  const { session } = await publishReady(env, waitContext());
+  const token = new URL(session.deleteUrl).pathname.split("/").pop();
 
-  const missingToken = await worker.fetch(
-    new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
-      method: "POST",
-      body: JSON.stringify({ partNumbers: [1] }),
-    }),
+  const page = await worker.fetch(new Request(session.deleteUrl), env, waitContext());
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Delete/);
+  assert.equal(env.__TEST_STORE.jobs.get(session.jobId).status, "ready");
+
+  const deleted = await worker.fetch(
+    new Request(`https://runs.example.com/api/delete/${token}`, { method: "POST" }),
     env,
-    ctx
+    waitContext()
   );
-  assert.equal(missingToken.status, 401);
+  assert.equal(deleted.status, 200);
+  assert.equal(env.__TEST_STORE.jobs.get(session.jobId).status, "deleted");
+  assert.equal(env.__TEST_BUCKET.has(`sites/${session.slug}/meta.json`), false);
 
-  for (const partNumbers of [[0], [2], [1, 1], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
-    const response = await worker.fetch(
-      new Request(`https://runs.example.com/api/uploads/${session.jobId}/parts`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ partNumbers }),
-      }),
-      env,
-      ctx
-    );
-    assert.equal(response.status, 400);
-  }
+  const again = await worker.fetch(
+    new Request(`https://runs.example.com/api/delete/${token}`, { method: "POST" }),
+    env,
+    waitContext()
+  );
+  assert.equal(again.status, 200);
 });
 
-test("rejects malformed multipart completion payloads", async () => {
-  const env = await makeEnv([["ALPHA-1", 4]]);
+test("reaper expires stale publishing jobs and 30-day maps", async () => {
+  const env = await makeEnv([["ALPHA-1", 2, "Alpha group"]]);
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
-  const { ctx } = waitContext();
-
-  const buildInvalidBody = [
-    (part) => ({ size: ZIP_SIZE + 1, parts: [part] }),
-    () => ({ size: ZIP_SIZE, parts: [] }),
-    (part) => ({ size: ZIP_SIZE, parts: [{ partNumber: 2, etag: part.etag }] }),
-    () => ({ size: ZIP_SIZE, parts: [{ partNumber: 1, etag: "not-an-etag" }] }),
-  ];
-
-  for (const [index, buildBody] of buildInvalidBody.entries()) {
-    const session = await json(await createSession(env, ctx, { slug: `runner-${index + 1}` }));
-    const part = await uploadPartToMemoryBucket(env, session);
-    const body = buildBody(part);
-    const response = await worker.fetch(
-      new Request(`https://runs.example.com/api/uploads/${session.jobId}/complete`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-      env,
-      ctx
-    );
-    assert.equal(response.status, 400);
-    assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
-    assert.equal(env.__TEST_STORE.slugs.has(`runner-${index + 1}`), false);
-  }
-});
-
-test("abort releases invite reservation and slug", async () => {
-  const env = await makeEnv();
-  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
-
-  const abort = await worker.fetch(
-    new Request(`https://runs.example.com/api/uploads/${session.jobId}/abort`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}` },
-    }),
-    env,
-    ctx
-  );
-  assert.equal(abort.status, 200);
+  const staleSession = await json(await createPublishSession(env, waitContext()));
+  await env.__TEST_STORE.updateJob(staleSession.jobId, {
+    updatedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+  });
+  const staleResult = await reapStaleJobs(env, Date.now());
+  assert.equal(staleResult.expired, 1);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
-  assert.equal(env.__TEST_STORE.slugs.has("runner"), false);
 
-  const retry = await createSession(env, ctx);
-  assert.equal(retry.status, 200);
+  const { session } = await publishReady(env, waitContext(), { displayName: "Second Runner" });
+  await env.__TEST_STORE.updateJob(session.jobId, { expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const expiryResult = await reapStaleJobs(env, Date.now());
+  assert.equal(expiryResult.expired, 1);
+  assert.equal(env.__TEST_STORE.jobs.get(session.jobId).status, "expired");
+  assert.equal(env.__TEST_BUCKET.has(`sites/${session.slug}/meta.json`), false);
 });
 
-test("processor success stores assets, serves wildcard site, and deletes raw upload", async () => {
+test("raw ZIP upload and processor callback routes are unavailable", async () => {
   const env = await makeEnv();
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx, { displayName: "Runner" }));
-  await completeTestUpload(env, ctx, session);
-
-  const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}` };
-  const start = await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/start`, {
-      method: "POST",
-      headers: auth,
-      body: "{}",
-    }),
+  const upload = await worker.fetch(
+    new Request("https://runs.example.com/api/upload-sessions", { method: "POST" }),
     env,
-    ctx
+    waitContext()
   );
-  assert.equal(start.status, 200);
-
-  for (const [name, body] of [
-    ["index.html", "<!doctype html><title>Runner</title>"],
-    ["app.js", "console.log('ok')"],
-    ["styles.css", "body{}"],
-    ["meta.json", '{"pointCount":1}'],
-    ["points.bin", "\0".repeat(12)],
-  ]) {
-    const response = await worker.fetch(
-      new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/assets/${name}`, {
-        method: "PUT",
-        headers: { ...auth, "Content-Length": String(Buffer.byteLength(body)) },
-        body,
-      }),
-      env,
-      ctx
-    );
-    assert.equal(response.status, 200);
-  }
-
-  const complete = await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/complete`, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "ready" }),
-    }),
+  assert.equal(upload.status, 404);
+  const processor = await worker.fetch(
+    new Request("https://runs.example.com/api/processor/reap", { method: "POST" }),
     env,
-    ctx
+    waitContext()
   );
-  assert.equal(complete.status, 200);
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
-
-  const site = await worker.fetch(
-    new Request("https://runner.runs.example.com/", {
-      headers: { Host: "runner.runs.example.com" },
-    }),
-    env,
-    ctx
-  );
-  assert.equal(site.status, 200);
-  assert.match(await site.text(), /Runner/);
-
-  const rawUpload = await worker.fetch(
-    new Request(`https://runner.runs.example.com/uploads/${session.jobId}/garmin-export.zip`, {
-      headers: { Host: "runner.runs.example.com" },
-    }),
-    env,
-    ctx
-  );
-  assert.equal(rawUpload.status, 404);
+  assert.equal(processor.status, 404);
 });
 
-test("rejects forged processor callbacks and unauthorized asset names", async () => {
+test("Garmin guide route returns 404", async () => {
   const env = await makeEnv();
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
-
-  const forged = await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/complete`, {
-      method: "POST",
-      body: JSON.stringify({ status: "ready" }),
-    }),
-    env,
-    ctx
-  );
-  assert.equal(forged.status, 401);
-
-  await completeTestUpload(env, ctx, session);
-  const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}` };
-  await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/start`, {
-      method: "POST",
-      headers: auth,
-      body: "{}",
-    }),
-    env,
-    ctx
-  );
-  const invalidAsset = await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/assets/garmin-export.zip`, {
-      method: "PUT",
-      headers: { ...auth, "Content-Length": "8" },
-      body: "zip-data",
-    }),
-    env,
-    ctx
-  );
-  assert.equal(invalidAsset.status, 400);
-});
-
-test("processor failure deletes raw upload and records clear status", async () => {
-  const env = await makeEnv();
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
-  await completeTestUpload(env, ctx, session);
-
-  const auth = { Authorization: `Bearer ${PROCESSOR_TOKEN}`, "Content-Type": "application/json" };
-  await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/start`, {
-      method: "POST",
-      headers: auth,
-      body: "{}",
-    }),
-    env,
-    ctx
-  );
-  const failed = await worker.fetch(
-    new Request(`https://runs.example.com/api/processor/jobs/${session.jobId}/complete`, {
-      method: "POST",
-      headers: auth,
-      body: JSON.stringify({ status: "failed", errorCode: "NO_RUNS_FOUND", errorMessage: "No runs." }),
-    }),
-    env,
-    ctx
-  );
-  assert.equal(failed.status, 200);
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
-
-  const status = await json(
-    await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx)
-  );
-  assert.equal(status.status, "failed");
-  assert.equal(status.errorCode, "NO_RUNS_FOUND");
-  assert.ok(status.rawUploadDeletedAt);
-});
-
-test("reaper expires stale jobs and retries raw ZIP deletion", async () => {
-  const env = await makeEnv();
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
-  await completeTestUpload(env, ctx, session);
-
-  const stale = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-  await env.__TEST_STORE.updateJob(session.jobId, { status: "processing", updatedAt: stale });
-  const result = await reapStaleJobs(env, Date.now());
-  assert.equal(result.failed, 1);
-  assert.equal(result.deletedUploads, 1);
-
-  const status = await json(
-    await worker.fetch(new Request(`https://runs.example.com/api/jobs/${session.jobId}`), env, ctx)
-  );
-  assert.equal(status.status, "failed");
-  assert.equal(status.errorCode, "PROCESSOR_TIMEOUT");
-  assert.ok(status.rawUploadDeletedAt);
-  assert.equal(env.__TEST_BUCKET.has(`uploads/${session.jobId}/garmin-export.zip`), false);
-});
-
-test("reaper aborts stale multipart uploads and releases slugs and invites", async () => {
-  const env = await makeEnv();
-  const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
-  const { ctx } = waitContext();
-  const session = await json(await createSession(env, ctx));
-
-  const stale = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
-  await env.__TEST_STORE.updateJob(session.jobId, { updatedAt: stale });
-  const result = await reapStaleJobs(env, Date.now());
-
-  assert.equal(result.expired, 1);
-  assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
-  assert.equal(env.__TEST_STORE.slugs.has("runner"), false);
-  const retry = await createSession(env, ctx);
-  assert.equal(retry.status, 200);
+  env.ASSETS = { fetch: async () => new Response("asset") };
+  const response = await worker.fetch(new Request("https://runs.example.com/guide/garmin-export"), env, waitContext());
+  assert.equal(response.status, 404);
 });

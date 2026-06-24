@@ -29,7 +29,6 @@
     "wrangler": "^4.26.0"
   },
   "dependencies": {
-    "@zip.js/zip.js": "^2.8.26",
-    "aws4fetch": "^1.0.20"
+    "@zip.js/zip.js": "^2.8.26"
   }
 }

@@ -5,8 +5,8 @@ export class MemoryStore {
     this.jobs = new Map();
   }
 
-  addInvite(codeHash, maxUses = 1) {
-    this.invites.set(codeHash, { codeHash, maxUses, uses: 0, reservedUses: 0 });
+  addInvite(codeHash, maxUses = 1, label = "") {
+    this.invites.set(codeHash, { codeHash, label, maxUses, uses: 0, reservedUses: 0 });
   }
 
   async getInviteByHash(hash) {
@@ -57,20 +57,31 @@ export class MemoryStore {
     return job ? { ...job } : null;
   }
 
+  async getJobBySlug(slug) {
+    const job = Array.from(this.jobs.values())
+      .filter((candidate) => candidate.slug === slug)
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+    return job ? { ...job } : null;
+  }
+
+  async getJobByDeleteTokenHash(hash) {
+    const job = Array.from(this.jobs.values()).find((candidate) => candidate.deleteTokenHash === hash);
+    return job ? { ...job } : null;
+  }
+
   async updateJob(jobId, patch) {
     const job = this.jobs.get(jobId);
     if (!job) return;
     Object.assign(job, patch);
   }
 
-  async listReapableJobs({ reservedCutoff, uploadingCutoff, queuedCutoff, processingCutoff }) {
+  async listReapableJobs({ reservedCutoff, publishingCutoff, now }) {
     return Array.from(this.jobs.values())
       .filter((job) => {
         if (job.status === "reserved" && job.updatedAt < reservedCutoff) return true;
-        if (job.status === "uploading" && job.updatedAt < uploadingCutoff) return true;
-        if (job.status === "queued" && job.updatedAt < queuedCutoff) return true;
-        if (job.status === "processing" && job.updatedAt < processingCutoff) return true;
-        return Boolean(job.uploadKey && !job.rawUploadDeletedAt && ["ready", "failed", "expired"].includes(job.status));
+        if (job.status === "publishing" && job.updatedAt < publishingCutoff) return true;
+        if (job.status === "ready" && job.expiresAt && job.expiresAt <= now) return true;
+        return false;
       })
       .sort((left, right) => String(left.updatedAt).localeCompare(String(right.updatedAt)))
       .slice(0, 100)

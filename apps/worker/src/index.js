@@ -1,33 +1,47 @@
-import { AwsClient } from "aws4fetch";
-
 const RESERVED_SLUGS = new Set([
   "www",
   "api",
   "admin",
+  "administrator",
   "static",
+  "asset",
   "assets",
+  "cdn",
+  "dashboard",
+  "ftp",
+  "help",
   "login",
-  "support",
+  "logout",
+  "mail",
+  "root",
   "guide",
   "garmin",
   "connect",
   "processor",
+  "runner-test",
+  "signin",
+  "signup",
+  "status",
+  "support",
+  "test",
+  "upload",
   "uploads",
   "jobs",
+  "worker",
+  "workers",
 ]);
-const ALLOWED_ASSETS = new Set(["index.html", "app.js", "styles.css", "meta.json", "points.bin"]);
-const DEFAULT_MAX_ZIP_BYTES = 1024 * 1024 * 1024;
-const DEFAULT_MULTIPART_PART_BYTES = 16 * 1024 * 1024;
-const MAX_MULTIPART_PARTS = 64;
-const MAX_SIGNED_PART_BATCH = 8;
-const PRESIGNED_PART_URL_TTL_SECONDS = 15 * 60;
+const ALLOWED_ASSETS = new Set(["meta.json", "points.bin"]);
+const LOCAL_MAX_ZIP_BYTES = 500 * 1024 * 1024;
 const DEFAULT_START_DATE = "2022-05-01";
 const DEFAULT_MAX_POINTS = 900_000;
 const DEFAULT_PUBLIC_HOST_SUFFIX = "runmaps.larsheimann.com";
 const RESERVED_JOB_TTL_MS = 60 * 60 * 1000;
-const UPLOADING_JOB_TTL_MS = 4 * 60 * 60 * 1000;
-const QUEUED_JOB_TTL_MS = 30 * 60 * 1000;
-const PROCESSING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const PUBLISHING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const MAP_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PUBLISH_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
+const SLUG_SUFFIX_LENGTH = 5;
+const SLUG_RETRY_LIMIT = 12;
+const SLUG_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 export default {
   async fetch(request, env, ctx) {
@@ -45,23 +59,25 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
 
   const url = new URL(request.url);
   try {
-    if (url.pathname.startsWith("/api/processor/")) {
-      return withCors(await handleProcessorRoute(request, env, url));
-    }
     if (url.pathname.startsWith("/api/")) {
       return withCors(await handleApiRoute(request, env, ctx, url));
+    }
+    const deleteMatch = url.pathname.match(/^\/delete\/([^/]+)$/);
+    if (deleteMatch) {
+      return await handleDeletePage(request, env, deleteMatch[1]);
     }
 
     const siteSlug = slugFromHost(request.headers.get("Host") || url.host, env.PUBLIC_HOST_SUFFIX);
     if (siteSlug) {
       return await serveGeneratedSite(request, env, siteSlug);
     }
+    if (hostLooksLikePublicSubdomain(request.headers.get("Host") || url.host, env.PUBLIC_HOST_SUFFIX)) {
+      return new Response("Not found", { status: 404, headers: securityHeaders() });
+    }
 
     if (env.ASSETS?.fetch) {
       if (url.pathname === "/guide/garmin-export") {
-        const assetUrl = new URL(request.url);
-        assetUrl.pathname = "/guide/garmin-export.html";
-        return withSecurityHeaders(await env.ASSETS.fetch(new Request(assetUrl.toString(), request)));
+        return new Response("Not found", { status: 404, headers: securityHeaders() });
       }
       return withSecurityHeaders(await env.ASSETS.fetch(request));
     }
@@ -76,18 +92,38 @@ async function handleApiRoute(request, env, ctx, url) {
   if (request.method === "GET" && url.pathname === "/api/config") {
     return jsonResponse({
       turnstileSiteKey: env.TURNSTILE_SITE_KEY || null,
-      maxZipBytes: maxZipBytes(env),
+      maxZipBytes: LOCAL_MAX_ZIP_BYTES,
+      localMaxZipBytes: LOCAL_MAX_ZIP_BYTES,
       publicHostSuffix: env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX,
+      maxMetaBytes: maxAssetBytes("meta.json"),
+      maxPointsBytes: maxAssetBytes("points.bin"),
     });
   }
 
-  if (request.method === "POST" && url.pathname === "/api/upload-sessions") {
-    return createUploadSession(request, env);
+  if (request.method === "POST" && url.pathname === "/api/publish-sessions") {
+    return createPublishSession(request, env);
   }
 
-  const uploadActionMatch = url.pathname.match(/^\/api\/uploads\/([^/]+)\/(parts|complete|abort)$/);
-  if (request.method === "POST" && uploadActionMatch) {
-    return handleMultipartUploadAction(request, env, ctx, uploadActionMatch[1], uploadActionMatch[2]);
+  const publishAssetMatch = url.pathname.match(/^\/api\/publish-sessions\/([^/]+)\/assets\/([^/]+)$/);
+  if (request.method === "PUT" && publishAssetMatch) {
+    return uploadPublishedAsset(request, env, publishAssetMatch[1], publishAssetMatch[2]);
+  }
+
+  const publishActionMatch = url.pathname.match(/^\/api\/publish-sessions\/([^/]+)\/(complete|abort)$/);
+  if (request.method === "POST" && publishActionMatch) {
+    return handlePublishAction(request, env, publishActionMatch[1], publishActionMatch[2]);
+  }
+
+  const deleteMatch = url.pathname.match(/^\/api\/delete\/([^/]+)$/);
+  if (request.method === "POST" && deleteMatch) {
+    return deleteByToken(env, deleteMatch[1]);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/maintenance/reap") {
+    if (!(await isMaintenanceAuthorized(request, env))) {
+      return errorResponse("UNAUTHORIZED", "Maintenance token is missing or invalid.", 401);
+    }
+    return jsonResponse(await reapStaleJobs(env));
   }
 
   const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
@@ -98,111 +134,16 @@ async function handleApiRoute(request, env, ctx, url) {
   return errorResponse("NOT_FOUND", "Route not found.", 404);
 }
 
-async function handleProcessorRoute(request, env, url) {
-  if (!(await isProcessorAuthorized(request, env))) {
-    return errorResponse("UNAUTHORIZED", "Processor token is missing or invalid.", 401);
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/processor/reap") {
-    return jsonResponse(await reapStaleJobs(env));
-  }
-
-  const match = url.pathname.match(/^\/api\/processor\/jobs\/([^/]+)(?:\/(.*))?$/);
-  if (!match) {
-    return errorResponse("NOT_FOUND", "Processor route not found.", 404);
-  }
-
-  const jobId = match[1];
-  if (!isValidJobId(jobId)) {
-    return errorResponse("INVALID_JOB_ID", "Job ID is invalid.", 400);
-  }
-  const action = match[2] || "";
-  const store = getStore(env);
-  const job = await store.getJob(jobId);
-  if (!job) {
-    return errorResponse("JOB_NOT_FOUND", "Job was not found.", 404);
-  }
-
-  if (request.method === "GET" && action === "") {
-    return jsonResponse(processorJobConfig(job, env));
-  }
-
-  if (request.method === "POST" && action === "start") {
-    if (!["queued", "uploaded"].includes(job.status)) {
-      return errorResponse("INVALID_STATUS", "Job is not queued for processing.", 409);
-    }
-    const now = new Date().toISOString();
-    await store.updateJob(jobId, { status: "processing", updatedAt: now });
-    return jsonResponse({ jobId, status: "processing" });
-  }
-
-  if (request.method === "GET" && action === "download") {
-    if (!job.uploadKey) {
-      return errorResponse("UPLOAD_NOT_FOUND", "Job does not have an upload.", 404);
-    }
-    const object = await getBucket(env).get(job.uploadKey);
-    if (!object) {
-      return errorResponse("UPLOAD_NOT_FOUND", "Raw upload was not found.", 404);
-    }
-    return objectResponse(object, "application/zip");
-  }
-
-  const assetMatch = action.match(/^assets\/([^/]+)$/);
-  if (request.method === "PUT" && assetMatch) {
-    if (job.status !== "processing") {
-      return errorResponse("INVALID_STATUS", "Job must be processing before assets can be uploaded.", 409);
-    }
-    const assetName = assetMatch[1];
-    if (!ALLOWED_ASSETS.has(assetName)) {
-      return errorResponse("INVALID_ASSET", "Asset name is not allowed.", 400);
-    }
-    const contentLength = Number(request.headers.get("Content-Length") || "");
-    if (!Number.isFinite(contentLength) || contentLength <= 0) {
-      return errorResponse("LENGTH_REQUIRED", "Content-Length is required.", 411);
-    }
-    if (contentLength > maxAssetBytes(assetName)) {
-      return errorResponse("ASSET_TOO_LARGE", "Generated asset is larger than allowed.", 413);
-    }
-    if (!request.body) {
-      return errorResponse("EMPTY_UPLOAD", "Asset body is required.", 400);
-    }
-    try {
-      await getBucket(env).put(
-        `sites/${job.slug}/${assetName}`,
-        limitStreamBytes(request.body, maxAssetBytes(assetName), "ASSET_TOO_LARGE"),
-        {
-          httpMetadata: { contentType: contentTypeForPath(assetName) },
-        }
-      );
-    } catch (error) {
-      if (isStreamLimitError(error, "ASSET_TOO_LARGE")) {
-        await getBucket(env)
-          .delete(`sites/${job.slug}/${assetName}`)
-          .catch(() => {});
-        return errorResponse("ASSET_TOO_LARGE", "Generated asset is larger than allowed.", 413);
-      }
-      throw error;
-    }
-    return jsonResponse({ ok: true });
-  }
-
-  if (request.method === "POST" && action === "complete") {
-    const payload = await request.json().catch(() => ({}));
-    return completeJob(env, job, payload);
-  }
-
-  return errorResponse("NOT_FOUND", "Processor route not found.", 404);
-}
-
-async function createUploadSession(request, env) {
+async function createPublishSession(request, env) {
   const payload = await request.json().catch(() => null);
   if (!payload) {
     return errorResponse("INVALID_JSON", "Request body must be JSON.", 400);
   }
 
-  const slug = normalizeSlug(payload.slug);
-  if (!isValidSlug(slug)) {
-    return errorResponse("INVALID_SLUG", "Use 3-40 lowercase letters, numbers, or hyphens.", 400);
+  const displayName = cleanDisplayName(payload.displayName);
+  const slugBase = slugBaseFromDisplayName(displayName);
+  if (!slugBase) {
+    return errorResponse("INVALID_DISPLAY_NAME", "Display name must contain at least 2 letters or numbers.", 400);
   }
 
   const inviteCode = normalizeInviteCode(payload.inviteCode);
@@ -225,60 +166,38 @@ async function createUploadSession(request, env) {
     return errorResponse("INVITE_EXHAUSTED", "Invite code has no remaining uses.", 403);
   }
 
-  const fileSize = cleanUploadSize(payload.fileSize);
-  if (!fileSize) {
-    return errorResponse("FILE_SIZE_REQUIRED", "Upload file size is required.", 400);
-  }
-  if (fileSize > maxZipBytes(env)) {
-    return errorResponse("ZIP_TOO_LARGE", "ZIP is larger than the configured limit.", 413);
-  }
-
   const jobId = crypto.randomUUID();
-  const uploadPartSize = multipartPartBytes(env);
-  if (Math.ceil(fileSize / uploadPartSize) > MAX_MULTIPART_PARTS) {
-    return errorResponse("ZIP_TOO_LARGE", "ZIP requires more upload parts than allowed.", 413);
-  }
-
   const inviteReserved = await store.reserveInviteUse(inviteHash);
   if (!inviteReserved) {
     return errorResponse("INVITE_EXHAUSTED", "Invite code has no remaining uses.", 403);
   }
 
-  const reserved = await store.reserveSlug(slug, jobId, now);
-  if (!reserved) {
+  const slug = await reserveGeneratedSlug(store, slugBase, jobId, now);
+  if (!slug) {
     await store.releaseInviteReservation(inviteHash);
-    return errorResponse("SLUG_TAKEN", "That slug is already reserved.", 409);
+    return errorResponse("SLUG_GENERATION_FAILED", "Could not reserve a public URL. Try publishing again.", 409);
   }
 
-  const displayName = cleanDisplayName(payload.displayName);
   const startDate = cleanStartDate(payload.startDate || env.DEFAULT_START_DATE || DEFAULT_START_DATE);
   const maxPoints = cleanMaxPoints(payload.maxPoints || env.DEFAULT_MAX_POINTS || DEFAULT_MAX_POINTS);
   const siteUrl = siteUrlForSlug(slug, env);
-  const uploadToken = await signUploadToken(env, {
+  const publishToken = await signUploadToken(env, {
     jobId,
+    purpose: "publish",
     jti: crypto.randomUUID(),
-    exp: Date.now() + UPLOADING_JOB_TTL_MS,
+    exp: Date.now() + PUBLISH_TOKEN_TTL_MS,
   });
-  const uploadKey = `uploads/${jobId}/garmin-export.zip`;
-  const uploadExpiresAt = new Date(Date.now() + UPLOADING_JOB_TTL_MS).toISOString();
-  let upload;
-
-  try {
-    upload = await getBucket(env).createMultipartUpload(uploadKey, {
-      httpMetadata: { contentType: "application/zip" },
-    });
-  } catch (error) {
-    await store.releaseInviteReservation(inviteHash);
-    await store.releaseSlug(slug, jobId);
-    throw error;
-  }
+  const deleteToken = `${crypto.randomUUID()}-${bytesToBase64url(crypto.getRandomValues(new Uint8Array(24)))}`;
+  const deleteTokenHash = await hashSecretToken(deleteToken, uploadSecret(env));
+  const publishExpiresAt = new Date(Date.now() + PUBLISH_TOKEN_TTL_MS).toISOString();
+  const mapExpiresAt = new Date(Date.now() + MAP_TTL_MS).toISOString();
 
   try {
     await store.createJob({
       jobId,
       slug,
       displayName,
-      status: "uploading",
+      status: "publishing",
       inviteCodeHash: inviteHash,
       createdAt: now,
       updatedAt: now,
@@ -286,18 +205,21 @@ async function createUploadSession(request, env) {
       errorMessage: null,
       siteUrl,
       rawUploadDeletedAt: null,
-      uploadKey,
+      uploadKey: null,
       startDate,
       maxPoints,
-      uploadMode: "r2-multipart",
-      uploadId: upload.uploadId,
-      uploadSize: fileSize,
-      uploadPartSize,
-      uploadExpiresAt,
+      uploadMode: "browser-artifacts",
+      uploadId: null,
+      uploadSize: null,
+      uploadPartSize: null,
+      uploadExpiresAt: publishExpiresAt,
       inviteUseState: "reserved",
+      expiresAt: mapExpiresAt,
+      publishedAt: null,
+      deletedAt: null,
+      deleteTokenHash,
     });
   } catch (error) {
-    await upload.abort().catch(() => {});
     await store.releaseInviteReservation(inviteHash);
     await store.releaseSlug(slug, jobId);
     throw error;
@@ -306,27 +228,36 @@ async function createUploadSession(request, env) {
   return jsonResponse({
     jobId,
     slug,
-    status: "uploading",
-    uploadToken,
-    uploadMode: "r2-multipart",
-    partSizeBytes: uploadPartSize,
-    maxZipBytes: maxZipBytes(env),
-    expiresAt: uploadExpiresAt,
+    status: "publishing",
+    publishToken,
+    uploadMode: "browser-artifacts",
+    maxMetaBytes: maxAssetBytes("meta.json"),
+    maxPointsBytes: maxAssetBytes("points.bin"),
+    expiresAt: publishExpiresAt,
+    mapExpiresAt,
     siteUrl,
+    deleteUrl: `${new URL(request.url).origin}/delete/${deleteToken}`,
+    assetUrls: {
+      "meta.json": `/api/publish-sessions/${jobId}/assets/meta.json`,
+      "points.bin": `/api/publish-sessions/${jobId}/assets/points.bin`,
+    },
   });
 }
 
-async function handleMultipartUploadAction(request, env, ctx, jobId, action) {
+async function uploadPublishedAsset(request, env, jobId, assetName) {
   if (!isValidJobId(jobId)) {
     return errorResponse("INVALID_JOB_ID", "Job ID is invalid.", 400);
   }
+  if (!ALLOWED_ASSETS.has(assetName)) {
+    return errorResponse("INVALID_ASSET", "Asset name is not allowed.", 400);
+  }
   const token = bearerToken(request);
   if (!token) {
-    return errorResponse("MISSING_UPLOAD_TOKEN", "Upload token is required.", 401);
+    return errorResponse("MISSING_PUBLISH_TOKEN", "Publish token is required.", 401);
   }
   const tokenPayload = await verifyUploadToken(env, token);
-  if (!tokenPayload || tokenPayload.jobId !== jobId) {
-    return errorResponse("INVALID_UPLOAD_TOKEN", "Upload token is invalid or expired.", 401);
+  if (!tokenPayload || tokenPayload.jobId !== jobId || tokenPayload.purpose !== "publish") {
+    return errorResponse("INVALID_PUBLISH_TOKEN", "Publish token is invalid or expired.", 401);
   }
 
   const store = getStore(env);
@@ -334,135 +265,103 @@ async function handleMultipartUploadAction(request, env, ctx, jobId, action) {
   if (!job) {
     return errorResponse("JOB_NOT_FOUND", "Job was not found.", 404);
   }
-  if (action === "parts") {
-    return createPartUploadUrls(request, env, job);
+  if (job.status !== "publishing") {
+    return errorResponse("INVALID_STATUS", "Job is not waiting for generated map files.", 409);
   }
-  if (action === "complete") {
-    return completeMultipartUpload(request, env, ctx, job);
+  if (job.uploadExpiresAt && Date.parse(job.uploadExpiresAt) < Date.now()) {
+    await expirePublishReservation(env, job, "PUBLISH_SESSION_EXPIRED", "Publish session expired.");
+    return errorResponse("INVALID_PUBLISH_TOKEN", "This publish session expired. Publish again.", 401);
   }
-  return abortMultipartUpload(env, job, "UPLOAD_ABORTED", "Upload was aborted.");
-}
-
-async function createPartUploadUrls(request, env, job) {
-  const statusError = validateUploadJob(job);
-  if (statusError) return statusError;
-  const payload = await request.json().catch(() => null);
-  const partNumbers = Array.isArray(payload?.partNumbers) ? payload.partNumbers.map(Number) : [];
-  if (!partNumbers.length || partNumbers.length > MAX_SIGNED_PART_BATCH) {
-    return errorResponse("INVALID_PARTS", `Request 1-${MAX_SIGNED_PART_BATCH} part URLs at a time.`, 400);
+  const contentLength = Number(request.headers.get("Content-Length") || "");
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    return errorResponse("LENGTH_REQUIRED", "Content-Length is required.", 411);
   }
-  const expectedParts = expectedPartCount(job);
-  const unique = new Set();
-  for (const partNumber of partNumbers) {
-    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > expectedParts) {
-      return errorResponse("INVALID_PART_NUMBER", "Part number is outside the expected upload range.", 400);
-    }
-    if (unique.has(partNumber)) {
-      return errorResponse("INVALID_PART_NUMBER", "Part numbers must be unique.", 400);
-    }
-    unique.add(partNumber);
+  if (contentLength > maxAssetBytes(assetName)) {
+    return errorResponse("ASSET_TOO_LARGE", "Generated map file is larger than allowed.", 413);
   }
-  const urls = await Promise.all(partNumbers.map((partNumber) => signR2UploadPartUrl(env, job, partNumber)));
-  return jsonResponse({ jobId: job.jobId, uploadId: job.uploadId, urls });
-}
-
-async function completeMultipartUpload(request, env, ctx, job) {
-  if (job.status !== "uploading") {
-    if (["queued", "processing", "ready"].includes(job.status)) {
-      return jsonResponse({
-        jobId: job.jobId,
-        status: job.status,
-        siteUrl: job.status === "ready" ? job.siteUrl : null,
-      });
-    }
-    return errorResponse("INVALID_STATUS", "Job is not waiting for upload.", 409);
+  if (!request.body) {
+    return errorResponse("EMPTY_UPLOAD", "Generated map file body is required.", 400);
   }
-  const statusError = validateUploadJob(job);
-  if (statusError) return statusError;
-  const payload = await request.json().catch(() => null);
-  const size = cleanUploadSize(payload?.size);
-  if (!size || size !== Number(job.uploadSize || 0) || size > maxZipBytes(env)) {
-    return failInvalidMultipartCompletion(
-      env,
-      job,
-      "INVALID_UPLOAD_SIZE",
-      "Completed upload size does not match the upload session."
-    );
-  }
-  const parts = validateCompletedParts(payload?.parts, expectedPartCount(job));
-  if (parts.error) {
-    return failInvalidMultipartCompletion(env, job, parts.error.code, parts.error.message);
-  }
-  const upload = getBucket(env).resumeMultipartUpload(job.uploadKey, job.uploadId);
-  let object;
   try {
-    object = await upload.complete(parts.value);
-  } catch {
-    return failInvalidMultipartCompletion(
-      env,
-      job,
-      "MULTIPART_COMPLETE_FAILED",
-      "Upload completion failed. Start a new upload."
+    await getBucket(env).put(
+      `sites/${job.slug}/${assetName}`,
+      limitStreamBytes(request.body, maxAssetBytes(assetName), "ASSET_TOO_LARGE"),
+      { httpMetadata: { contentType: contentTypeForPath(assetName) } }
     );
+  } catch (error) {
+    if (isStreamLimitError(error, "ASSET_TOO_LARGE")) {
+      await getBucket(env)
+        .delete(`sites/${job.slug}/${assetName}`)
+        .catch(() => {});
+      return errorResponse("ASSET_TOO_LARGE", "Generated map file is larger than allowed.", 413);
+    }
+    throw error;
   }
-  if (Number(object.size || 0) !== size) {
-    await getBucket(env)
-      .delete(job.uploadKey)
-      .catch(() => {});
-    await expireUploadReservation(env, job, "UPLOAD_SIZE_MISMATCH", "Uploaded ZIP size did not match the session.");
-    return errorResponse("UPLOAD_SIZE_MISMATCH", "Uploaded ZIP size did not match the session.", 400);
+  return jsonResponse({ ok: true, jobId: job.jobId, assetName });
+}
+
+async function handlePublishAction(request, env, jobId, action) {
+  if (!isValidJobId(jobId)) {
+    return errorResponse("INVALID_JOB_ID", "Job ID is invalid.", 400);
+  }
+  const token = bearerToken(request);
+  if (!token) {
+    return errorResponse("MISSING_PUBLISH_TOKEN", "Publish token is required.", 401);
+  }
+  const tokenPayload = await verifyUploadToken(env, token);
+  if (!tokenPayload || tokenPayload.jobId !== jobId || tokenPayload.purpose !== "publish") {
+    return errorResponse("INVALID_PUBLISH_TOKEN", "Publish token is invalid or expired.", 401);
+  }
+  const job = await getStore(env).getJob(jobId);
+  if (!job) {
+    return errorResponse("JOB_NOT_FOUND", "Job was not found.", 404);
+  }
+  if (action === "abort") {
+    await expirePublishReservation(env, job, "PUBLISH_ABORTED", "Publish was canceled.");
+    return jsonResponse({ jobId: job.jobId, status: "expired" });
+  }
+  return completePublish(env, job);
+}
+
+async function completePublish(env, job) {
+  if (job.status !== "publishing") {
+    if (job.status === "ready") {
+      return jsonResponse({ jobId: job.jobId, status: "ready", siteUrl: job.siteUrl });
+    }
+    return errorResponse("INVALID_STATUS", "Job is not waiting for generated map files.", 409);
+  }
+  const validation = await validatePublishedAssets(env, job);
+  if (validation.error) {
+    await expirePublishReservation(env, job, validation.error.code, validation.error.message);
+    await deleteSiteAssets(env, job.slug);
+    return errorResponse(validation.error.code, validation.error.message, validation.error.status || 400);
   }
   const consumed = await getStore(env).consumeInviteReservation(job.inviteCodeHash);
   if (!consumed) {
-    await getBucket(env)
-      .delete(job.uploadKey)
-      .catch(() => {});
-    await expireUploadReservation(env, job, "INVITE_EXHAUSTED", "Invite code has no remaining uses.");
+    await expirePublishReservation(env, job, "INVITE_EXHAUSTED", "Invite code has no remaining uses.");
+    await deleteSiteAssets(env, job.slug);
     return errorResponse("INVITE_EXHAUSTED", "Invite code has no remaining uses.", 403);
   }
   const now = new Date().toISOString();
   await getStore(env).updateJob(job.jobId, {
-    status: "queued",
+    status: "ready",
     updatedAt: now,
-    uploadSize: size,
+    publishedAt: now,
     errorCode: null,
     errorMessage: null,
     inviteUseState: "consumed",
+    siteUrl: job.siteUrl || siteUrlForSlug(job.slug, env),
   });
-  const trigger = triggerProcessor(env, job.jobId).catch((error) => {
-    console.error(JSON.stringify({ level: "error", message: "processor trigger failed", detail: String(error) }));
+  return jsonResponse({
+    jobId: job.jobId,
+    slug: job.slug,
+    status: "ready",
+    siteUrl: job.siteUrl || siteUrlForSlug(job.slug, env),
+    expiresAt: job.expiresAt,
   });
-  ctx.waitUntil(trigger);
-
-  return jsonResponse({ jobId: job.jobId, status: "queued" });
 }
 
-async function failInvalidMultipartCompletion(env, job, errorCode, errorMessage) {
-  if (job.uploadId) {
-    await getBucket(env)
-      .resumeMultipartUpload(job.uploadKey, job.uploadId)
-      .abort()
-      .catch(() => {});
-  }
-  await expireUploadReservation(env, job, errorCode, errorMessage);
-  return errorResponse(errorCode, errorMessage, 400);
-}
-
-async function abortMultipartUpload(env, job, errorCode, errorMessage) {
-  if (job.status !== "uploading") {
-    return errorResponse("INVALID_STATUS", "Job is not waiting for upload.", 409);
-  }
-  if (job.uploadId) {
-    await getBucket(env)
-      .resumeMultipartUpload(job.uploadKey, job.uploadId)
-      .abort()
-      .catch(() => {});
-  }
-  await expireUploadReservation(env, job, errorCode, errorMessage);
-  return jsonResponse({ jobId: job.jobId, status: "expired" });
-}
-
-async function expireUploadReservation(env, job, errorCode, errorMessage) {
+async function expirePublishReservation(env, job, errorCode, errorMessage) {
   const now = new Date().toISOString();
   const store = getStore(env);
   if (job.inviteUseState === "reserved") {
@@ -478,95 +377,91 @@ async function expireUploadReservation(env, job, errorCode, errorMessage) {
   });
 }
 
-function validateUploadJob(job) {
-  if (job.status !== "uploading") {
-    return errorResponse("INVALID_STATUS", "Job is not waiting for upload.", 409);
+async function validatePublishedAssets(env, job) {
+  const bucket = getBucket(env);
+  const [metaObject, pointsObject] = await Promise.all([
+    bucket.get(`sites/${job.slug}/meta.json`),
+    bucket.get(`sites/${job.slug}/points.bin`),
+  ]);
+  if (!metaObject || !pointsObject) {
+    return { error: { code: "PUBLISH_ASSETS_MISSING", message: "Generated map files were missing." } };
   }
-  if (!job.uploadId || job.uploadMode !== "r2-multipart") {
-    return errorResponse("UPLOAD_NOT_FOUND", "Multipart upload was not initialized.", 404);
+  const [metaBuffer, pointsBuffer] = await Promise.all([metaObject.arrayBuffer(), pointsObject.arrayBuffer()]);
+  if (metaBuffer.byteLength > maxAssetBytes("meta.json") || pointsBuffer.byteLength > maxAssetBytes("points.bin")) {
+    return { error: { code: "ASSET_TOO_LARGE", message: "Generated map files are larger than allowed.", status: 413 } };
   }
-  if (job.uploadExpiresAt && Date.parse(job.uploadExpiresAt) < Date.now()) {
-    return errorResponse("INVALID_UPLOAD_TOKEN", "This upload session expired. Start the upload again.", 401);
+  let meta;
+  try {
+    meta = JSON.parse(new TextDecoder().decode(metaBuffer));
+  } catch {
+    return { error: { code: "INVALID_META", message: "Generated metadata is not valid JSON." } };
   }
-  return null;
-}
-
-function expectedPartCount(job) {
-  return Math.ceil(Number(job.uploadSize || 0) / Number(job.uploadPartSize || DEFAULT_MULTIPART_PART_BYTES));
-}
-
-function validateCompletedParts(rawParts, expectedParts) {
-  if (
-    !Array.isArray(rawParts) ||
-    rawParts.length !== expectedParts ||
-    expectedParts < 1 ||
-    expectedParts > MAX_MULTIPART_PARTS
-  ) {
-    return {
-      error: {
-        code: "INVALID_PARTS",
-        message: "Uploaded parts do not match the expected file size.",
-      },
-    };
+  const pointCount = Number(meta.pointCount);
+  if (!Number.isInteger(pointCount) || pointCount <= 0 || pointCount > 3_000_000) {
+    return { error: { code: "INVALID_META", message: "Generated metadata has an invalid point count." } };
   }
-  const seen = new Set();
-  const parts = rawParts
-    .map((part) => ({
-      partNumber: Number(part?.partNumber),
-      etag: String(part?.etag || "").trim(),
-    }))
-    .sort((left, right) => left.partNumber - right.partNumber);
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index];
-    if (part.partNumber !== index + 1 || seen.has(part.partNumber)) {
-      return {
-        error: {
-          code: "INVALID_PARTS",
-          message: "Uploaded parts must be contiguous and unique.",
-        },
-      };
-    }
-    if (!/^"?[0-9a-f]{32}(?:-\d+)?"?$/i.test(part.etag)) {
-      return {
-        error: {
-          code: "INVALID_PART_ETAG",
-          message: "Uploaded part ETag is invalid.",
-        },
-      };
-    }
-    seen.add(part.partNumber);
+  if (pointsBuffer.byteLength !== pointCount * 12) {
+    return { error: { code: "POINTS_SIZE_MISMATCH", message: "Generated points file does not match metadata." } };
   }
-  return {
-    value: parts.map((part) => ({
-      partNumber: part.partNumber,
-      etag: part.etag,
-    })),
+  const rewrittenMeta = {
+    ...meta,
+    slug: job.slug,
+    displayName: job.displayName,
+    viewerTitle: possessiveTitle(job.displayName),
+    siteUrl: job.siteUrl,
+    localOnly: false,
+    publishedAt: new Date().toISOString(),
+    expiresAt: job.expiresAt,
+    privacy: {
+      ...(typeof meta.privacy === "object" && meta.privacy ? meta.privacy : {}),
+      rawZipUploaded: false,
+      browserProcessed: true,
+    },
   };
+  await bucket.put(`sites/${job.slug}/meta.json`, JSON.stringify(rewrittenMeta), {
+    httpMetadata: { contentType: contentTypeForPath("meta.json") },
+  });
+  return { meta: rewrittenMeta };
 }
 
-async function signR2UploadPartUrl(env, job, partNumber) {
-  if (env.__TEST_R2_UPLOAD_BASE) {
-    const testUrl = new URL(`/__r2/${job.jobId}`, env.__TEST_R2_UPLOAD_BASE);
-    testUrl.searchParams.set("partNumber", String(partNumber));
-    testUrl.searchParams.set("uploadId", job.uploadId);
-    return { partNumber, url: testUrl.toString(), expiresIn: PRESIGNED_PART_URL_TTL_SECONDS };
+async function deleteSiteAssets(env, slug) {
+  await getBucket(env)
+    .delete([`sites/${slug}/meta.json`, `sites/${slug}/points.bin`])
+    .catch(() => {});
+}
+
+async function handleDeletePage(request, env, token) {
+  const tokenHash = await hashSecretToken(token, uploadSecret(env));
+  const job = await getStore(env).getJobByDeleteTokenHash(tokenHash);
+  if (!job) {
+    return htmlResponse("This delete link is invalid or expired.", 404);
   }
-  const client = new AwsClient({
-    accessKeyId: requiredSecret(env, "R2_UPLOAD_ACCESS_KEY_ID"),
-    secretAccessKey: requiredSecret(env, "R2_UPLOAD_SECRET_ACCESS_KEY"),
-    service: "s3",
-    region: "auto",
-  });
-  const url = new URL(
-    `https://${requiredEnvValue(env, "R2_ACCOUNT_ID")}.r2.cloudflarestorage.com/${encodePathSegment(
-      requiredEnvValue(env, "R2_BUCKET_NAME")
-    )}/${encodeObjectKey(job.uploadKey)}`
-  );
-  url.searchParams.set("partNumber", String(partNumber));
-  url.searchParams.set("uploadId", job.uploadId);
-  url.searchParams.set("X-Amz-Expires", String(PRESIGNED_PART_URL_TTL_SECONDS));
-  const signed = await client.sign(new Request(url, { method: "PUT" }), { aws: { signQuery: true } });
-  return { partNumber, url: signed.url, expiresIn: PRESIGNED_PART_URL_TTL_SECONDS };
+  const deleted = job.status === "deleted" || Boolean(job.deletedAt);
+  const expires = job.expiresAt ? new Date(job.expiresAt).toLocaleDateString("en-US") : "30 days after publishing";
+  const title = deleted ? "This map was already deleted." : `Delete ${job.displayName || "this map"}?`;
+  const body = deleted
+    ? `<p>This public running map has already been deleted.</p><p><a href="/">Create a new map</a></p>`
+    : `<p>The public URL <code>${escapeHtml(job.siteUrl || siteUrlForSlug(job.slug, env))}</code> will stop working immediately.</p>
+       <p>If you do nothing, this map will be automatically deleted on ${escapeHtml(expires)}.</p>
+       <form method="post" action="/api/delete/${encodeURIComponent(token)}">
+         <button type="submit">Delete map now</button>
+       </form>
+       <p><a href="${escapeHtml(job.siteUrl || siteUrlForSlug(job.slug, env))}">Keep it and view the map</a></p>`;
+  return fullHtmlResponse(title, body);
+}
+
+async function deleteByToken(env, token) {
+  const tokenHash = await hashSecretToken(token, uploadSecret(env));
+  const job = await getStore(env).getJobByDeleteTokenHash(tokenHash);
+  if (!job) {
+    return errorResponse("DELETE_TOKEN_INVALID", "Delete link is invalid or expired.", 404);
+  }
+  if (job.status !== "deleted") {
+    const now = new Date().toISOString();
+    await deleteSiteAssets(env, job.slug);
+    await getStore(env).updateJob(job.jobId, { status: "deleted", deletedAt: now, updatedAt: now });
+  }
+  return fullHtmlResponse("Map deleted", `<p>This map has been deleted.</p><p><a href="/">Create a new map</a></p>`);
 }
 
 async function getPublicJob(env, jobId) {
@@ -581,58 +476,35 @@ async function getPublicJob(env, jobId) {
     errorCode: job.errorCode,
     errorMessage: job.errorMessage,
     siteUrl: job.status === "ready" ? job.siteUrl : null,
-    rawUploadDeletedAt: job.rawUploadDeletedAt,
+    expiresAt: job.expiresAt,
+    publishedAt: job.publishedAt,
+    deletedAt: job.deletedAt,
   });
-}
-
-async function completeJob(env, job, payload) {
-  const status = payload.status;
-  if (!["ready", "failed"].includes(status)) {
-    return errorResponse("INVALID_STATUS", "Completion status must be ready or failed.", 400);
-  }
-
-  const now = new Date().toISOString();
-  let rawUploadDeletedAt = job.rawUploadDeletedAt;
-  if (job.uploadKey && !rawUploadDeletedAt) {
-    try {
-      await getBucket(env).delete(job.uploadKey);
-      rawUploadDeletedAt = now;
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          message: "raw upload deletion failed",
-          jobId: job.jobId,
-          detail: String(error),
-        })
-      );
-    }
-  }
-
-  const patch =
-    status === "ready"
-      ? {
-          status: "ready",
-          updatedAt: now,
-          errorCode: null,
-          errorMessage: null,
-          rawUploadDeletedAt,
-          siteUrl: job.siteUrl || siteUrlForSlug(job.slug, env),
-        }
-      : {
-          status: "failed",
-          updatedAt: now,
-          errorCode: String(payload.errorCode || "PROCESSING_FAILED"),
-          errorMessage: String(payload.errorMessage || "Processing failed."),
-          rawUploadDeletedAt,
-        };
-  await getStore(env).updateJob(job.jobId, patch);
-  return jsonResponse({ jobId: job.jobId, status, rawUploadDeletedAt });
 }
 
 async function serveGeneratedSite(request, env, slug) {
   const url = new URL(request.url);
   const path = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+  const job = await getStore(env).getJobBySlug(slug);
+  if (!job) {
+    return new Response("Not found", { status: 404 });
+  }
+  if (["deleted", "expired"].includes(job.status) || (job.expiresAt && Date.parse(job.expiresAt) <= Date.now())) {
+    return expiredMapResponse();
+  }
+  if (job.status !== "ready") {
+    return new Response("Not found", { status: 404 });
+  }
+  if (path === "index.html" || path === "app.js" || path === "styles.css") {
+    if (!env.ASSETS?.fetch) return new Response("Not found", { status: 404 });
+    const assetUrl = new URL(request.url);
+    assetUrl.hostname = url.hostname;
+    assetUrl.pathname = `/viewer/${path}`;
+    const response = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+    const secured = withSecurityHeaders(response);
+    secured.headers.set("Cache-Control", path === "index.html" ? "public, max-age=60" : "public, max-age=3600");
+    return secured;
+  }
   if (!ALLOWED_ASSETS.has(path)) {
     return new Response("Not found", { status: 404 });
   }
@@ -641,43 +513,8 @@ async function serveGeneratedSite(request, env, slug) {
     return new Response("Not found", { status: 404 });
   }
   const response = objectResponse(object, contentTypeForPath(path));
-  response.headers.set("Cache-Control", path === "index.html" ? "public, max-age=60" : "public, max-age=31536000");
+  response.headers.set("Cache-Control", "public, max-age=31536000");
   return response;
-}
-
-function processorJobConfig(job, env) {
-  return {
-    jobId: job.jobId,
-    slug: job.slug,
-    displayName: job.displayName,
-    siteUrl: job.siteUrl || siteUrlForSlug(job.slug, env),
-    startDate: job.startDate || env.DEFAULT_START_DATE || DEFAULT_START_DATE,
-    maxPoints: Number(job.maxPoints || env.DEFAULT_MAX_POINTS || DEFAULT_MAX_POINTS),
-  };
-}
-
-async function triggerProcessor(env, jobId) {
-  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) {
-    return;
-  }
-  const workflow = env.GITHUB_WORKFLOW || "process-job.yml";
-  const branch = env.GITHUB_REF || "main";
-  const response = await fetch(
-    `https://api.github.com/repos/${env.GITHUB_REPOSITORY}/actions/workflows/${workflow}/dispatches`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-        "User-Agent": "garmin-footprints-worker",
-      },
-      body: JSON.stringify({ ref: branch, inputs: { jobId } }),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(`GitHub workflow dispatch failed with ${response.status}`);
-  }
 }
 
 class D1Store {
@@ -691,7 +528,7 @@ class D1Store {
   async getInviteByHash(hash) {
     return this.db
       .prepare(
-        "SELECT code_hash AS codeHash, max_uses AS maxUses, uses, reserved_uses AS reservedUses FROM invites WHERE code_hash = ?"
+        "SELECT code_hash AS codeHash, label, max_uses AS maxUses, uses, reserved_uses AS reservedUses FROM invites WHERE code_hash = ?"
       )
       .bind(hash)
       .first();
@@ -749,8 +586,9 @@ class D1Store {
         `INSERT INTO jobs (
           job_id, slug, display_name, status, invite_code_hash, created_at, updated_at,
           upload_key, error_code, error_message, site_url, raw_upload_deleted_at, start_date, max_points,
-          upload_mode, upload_id, upload_size, upload_part_size, upload_expires_at, invite_use_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          upload_mode, upload_id, upload_size, upload_part_size, upload_expires_at, invite_use_state,
+          expires_at, published_at, deleted_at, delete_token_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         job.jobId,
@@ -772,27 +610,45 @@ class D1Store {
         job.uploadSize,
         job.uploadPartSize,
         job.uploadExpiresAt,
-        job.inviteUseState
+        job.inviteUseState,
+        job.expiresAt,
+        job.publishedAt,
+        job.deletedAt,
+        job.deleteTokenHash
       )
       .run();
   }
 
+  jobSelectSql(whereClause) {
+    return `SELECT
+      job_id AS jobId, slug, display_name AS displayName, status,
+      invite_code_hash AS inviteCodeHash, created_at AS createdAt, updated_at AS updatedAt,
+      upload_key AS uploadKey, error_code AS errorCode, error_message AS errorMessage,
+      site_url AS siteUrl, raw_upload_deleted_at AS rawUploadDeletedAt,
+      start_date AS startDate, max_points AS maxPoints,
+      upload_mode AS uploadMode, upload_id AS uploadId, upload_size AS uploadSize,
+      upload_part_size AS uploadPartSize, upload_expires_at AS uploadExpiresAt,
+      invite_use_state AS inviteUseState, expires_at AS expiresAt,
+      published_at AS publishedAt, deleted_at AS deletedAt,
+      delete_token_hash AS deleteTokenHash
+    FROM jobs ${whereClause}`;
+  }
+
   async getJob(jobId) {
+    const row = await this.db.prepare(this.jobSelectSql("WHERE job_id = ?")).bind(jobId).first();
+    return row || null;
+  }
+
+  async getJobBySlug(slug) {
     const row = await this.db
-      .prepare(
-        `SELECT
-          job_id AS jobId, slug, display_name AS displayName, status,
-          invite_code_hash AS inviteCodeHash, created_at AS createdAt, updated_at AS updatedAt,
-          upload_key AS uploadKey, error_code AS errorCode, error_message AS errorMessage,
-          site_url AS siteUrl, raw_upload_deleted_at AS rawUploadDeletedAt,
-          start_date AS startDate, max_points AS maxPoints,
-          upload_mode AS uploadMode, upload_id AS uploadId, upload_size AS uploadSize,
-          upload_part_size AS uploadPartSize, upload_expires_at AS uploadExpiresAt,
-          invite_use_state AS inviteUseState
-        FROM jobs WHERE job_id = ?`
-      )
-      .bind(jobId)
+      .prepare(this.jobSelectSql("WHERE slug = ? ORDER BY created_at DESC LIMIT 1"))
+      .bind(slug)
       .first();
+    return row || null;
+  }
+
+  async getJobByDeleteTokenHash(hash) {
+    const row = await this.db.prepare(this.jobSelectSql("WHERE delete_token_hash = ? LIMIT 1")).bind(hash).first();
     return row || null;
   }
 
@@ -811,6 +667,10 @@ class D1Store {
       uploadPartSize: "upload_part_size",
       uploadExpiresAt: "upload_expires_at",
       inviteUseState: "invite_use_state",
+      expiresAt: "expires_at",
+      publishedAt: "published_at",
+      deletedAt: "deleted_at",
+      deleteTokenHash: "delete_token_hash",
     };
     const entries = Object.entries(patch).filter(([key]) => columns[key]);
     if (!entries.length) return;
@@ -823,29 +683,18 @@ class D1Store {
   }
 
   async listReapableJobs(cutoffs) {
-    const { reservedCutoff, uploadingCutoff, queuedCutoff, processingCutoff } = cutoffs;
+    const { reservedCutoff, publishingCutoff, now } = cutoffs;
     const rows = await this.db
       .prepare(
-        `SELECT
-          job_id AS jobId, slug, display_name AS displayName, status,
-          invite_code_hash AS inviteCodeHash, created_at AS createdAt, updated_at AS updatedAt,
-          upload_key AS uploadKey, error_code AS errorCode, error_message AS errorMessage,
-          site_url AS siteUrl, raw_upload_deleted_at AS rawUploadDeletedAt,
-          start_date AS startDate, max_points AS maxPoints,
-          upload_mode AS uploadMode, upload_id AS uploadId, upload_size AS uploadSize,
-          upload_part_size AS uploadPartSize, upload_expires_at AS uploadExpiresAt,
-          invite_use_state AS inviteUseState
-        FROM jobs
+        `${this.jobSelectSql("")}
         WHERE
           (status = 'reserved' AND updated_at < ?)
-          OR (status = 'uploading' AND updated_at < ?)
-          OR (status = 'queued' AND updated_at < ?)
-          OR (status = 'processing' AND updated_at < ?)
-          OR (upload_key IS NOT NULL AND raw_upload_deleted_at IS NULL AND status IN ('ready', 'failed', 'expired'))
+          OR (status = 'publishing' AND updated_at < ?)
+          OR (status = 'ready' AND expires_at IS NOT NULL AND expires_at <= ?)
         ORDER BY updated_at ASC
         LIMIT 100`
       )
-      .bind(reservedCutoff, uploadingCutoff, queuedCutoff, processingCutoff)
+      .bind(reservedCutoff, publishingCutoff, now)
       .all();
     return rows.results || [];
   }
@@ -870,12 +719,6 @@ function normalizeInviteCode(value) {
     .toUpperCase();
 }
 
-function normalizeSlug(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
 function isValidSlug(slug) {
   return /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(slug) && !RESERVED_SLUGS.has(slug);
 }
@@ -884,6 +727,38 @@ function cleanDisplayName(value) {
   return String(value || "")
     .trim()
     .slice(0, 80);
+}
+
+function slugBaseFromDisplayName(value) {
+  const normalized = String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  const trimmed = normalized.slice(0, 34).replace(/-$/g, "");
+  return trimmed.length >= 2 ? trimmed : "";
+}
+
+async function reserveGeneratedSlug(store, slugBase, jobId, createdAt) {
+  for (let attempt = 0; attempt < SLUG_RETRY_LIMIT; attempt += 1) {
+    const slug = `${slugBase}-${randomSlugSuffix()}`;
+    if (!isValidSlug(slug)) continue;
+    if (await store.reserveSlug(slug, jobId, createdAt)) return slug;
+  }
+  return null;
+}
+
+function randomSlugSuffix() {
+  const bytes = crypto.getRandomValues(new Uint8Array(SLUG_SUFFIX_LENGTH));
+  return Array.from(bytes, (byte) => SLUG_SUFFIX_ALPHABET[byte % SLUG_SUFFIX_ALPHABET.length]).join("");
+}
+
+function possessiveTitle(displayName) {
+  const name = cleanDisplayName(displayName);
+  if (!name) return "Running Footprints";
+  return `${name}${name.toLowerCase().endsWith("s") ? "'" : "'s"} Running Footprints`;
 }
 
 function cleanStartDate(value) {
@@ -897,27 +772,8 @@ function cleanMaxPoints(value) {
   return Math.max(1_000, Math.min(2_000_000, Math.floor(parsed)));
 }
 
-function cleanUploadSize(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  const size = Math.floor(parsed);
-  return size > 0 ? size : null;
-}
-
 function isValidJobId(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
-}
-
-function maxZipBytes(env) {
-  const configured = Number(env.MAX_ZIP_BYTES || DEFAULT_MAX_ZIP_BYTES);
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_ZIP_BYTES;
-}
-
-function multipartPartBytes(env) {
-  const configured = Number(env.MULTIPART_PART_BYTES || DEFAULT_MULTIPART_PART_BYTES);
-  const value =
-    Number.isFinite(configured) && configured >= 5 * 1024 * 1024 ? configured : DEFAULT_MULTIPART_PART_BYTES;
-  return Math.floor(value);
 }
 
 function maxAssetBytes(assetName) {
@@ -944,24 +800,8 @@ function requiredSecret(env, name, localFallback) {
   throw new Error(`${name} secret is required.`);
 }
 
-function requiredEnvValue(env, name) {
-  const value = env[name];
-  if (!value) {
-    throw new Error(`${name} is required.`);
-  }
-  return String(value);
-}
-
 function bearerToken(request) {
   return (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
-}
-
-function encodePathSegment(value) {
-  return encodeURIComponent(String(value));
-}
-
-function encodeObjectKey(key) {
-  return String(key).split("/").map(encodePathSegment).join("/");
 }
 
 function limitStreamBytes(stream, maxBytes, errorCode) {
@@ -1011,6 +851,13 @@ function slugFromHost(hostHeader, suffix = DEFAULT_PUBLIC_HOST_SUFFIX) {
   const slug = host.slice(0, -normalizedSuffix.length - 1);
   if (slug.includes(".") || !isValidSlug(slug)) return null;
   return slug;
+}
+
+function hostLooksLikePublicSubdomain(hostHeader, suffix = DEFAULT_PUBLIC_HOST_SUFFIX) {
+  const host = hostHeader.split(":")[0].toLowerCase();
+  const normalizedSuffix = String(suffix || DEFAULT_PUBLIC_HOST_SUFFIX).toLowerCase();
+  const prefix = host.slice(0, -normalizedSuffix.length - 1);
+  return host.endsWith(`.${normalizedSuffix}`) && Boolean(prefix) && !prefix.includes(".");
 }
 
 async function verifyTurnstile(request, env, token) {
@@ -1070,78 +917,53 @@ async function verifyTurnstile(request, env, token) {
 export async function reapStaleJobs(env, nowMs = Date.now()) {
   const now = new Date(nowMs).toISOString();
   const cutoffs = {
+    now,
     reservedCutoff: new Date(nowMs - RESERVED_JOB_TTL_MS).toISOString(),
-    uploadingCutoff: new Date(nowMs - UPLOADING_JOB_TTL_MS).toISOString(),
-    queuedCutoff: new Date(nowMs - QUEUED_JOB_TTL_MS).toISOString(),
-    processingCutoff: new Date(nowMs - PROCESSING_JOB_TTL_MS).toISOString(),
+    publishingCutoff: new Date(nowMs - PUBLISHING_JOB_TTL_MS).toISOString(),
   };
   const store = getStore(env);
-  const bucket = getBucket(env);
   const jobs = await store.listReapableJobs(cutoffs);
-  const result = { checked: jobs.length, expired: 0, failed: 0, deletedUploads: 0, deletionFailures: 0 };
+  const result = { checked: jobs.length, expired: 0, deletedMaps: 0, deletionFailures: 0 };
 
   for (const job of jobs) {
-    let nextStatus = job.status;
     const patch = { updatedAt: now };
     if (job.status === "reserved" && job.updatedAt < cutoffs.reservedCutoff) {
-      nextStatus = "expired";
       Object.assign(patch, {
-        status: nextStatus,
-        errorCode: "UPLOAD_SESSION_EXPIRED",
-        errorMessage: "Upload session expired before a ZIP was received.",
+        status: "expired",
+        errorCode: "PUBLISH_SESSION_EXPIRED",
+        errorMessage: "Publish session expired before generated files were received.",
       });
       await store.releaseSlug(job.slug, job.jobId);
       result.expired += 1;
-    } else if (job.status === "uploading" && job.updatedAt < cutoffs.uploadingCutoff) {
-      nextStatus = "expired";
-      if (job.uploadId) {
-        await bucket
-          .resumeMultipartUpload(job.uploadKey, job.uploadId)
-          .abort()
-          .catch(() => {});
-      }
+    } else if (job.status === "publishing" && job.updatedAt < cutoffs.publishingCutoff) {
       if (job.inviteUseState === "reserved") {
         await store.releaseInviteReservation(job.inviteCodeHash);
         patch.inviteUseState = "released";
       }
       await store.releaseSlug(job.slug, job.jobId);
+      await deleteSiteAssets(env, job.slug);
       Object.assign(patch, {
-        status: nextStatus,
-        errorCode: "UPLOAD_SESSION_EXPIRED",
-        errorMessage: "Upload session expired before a ZIP was received.",
+        status: "expired",
+        errorCode: "PUBLISH_SESSION_EXPIRED",
+        errorMessage: "Publish session expired before generated files were received.",
       });
       result.expired += 1;
-    } else if (job.status === "queued" && job.updatedAt < cutoffs.queuedCutoff) {
-      nextStatus = "failed";
-      Object.assign(patch, {
-        status: nextStatus,
-        errorCode: "PROCESSOR_DISPATCH_TIMEOUT",
-        errorMessage: "Processing did not start in time.",
-      });
-      result.failed += 1;
-    } else if (job.status === "processing" && job.updatedAt < cutoffs.processingCutoff) {
-      nextStatus = "failed";
-      Object.assign(patch, {
-        status: nextStatus,
-        errorCode: "PROCESSOR_TIMEOUT",
-        errorMessage: "Processing took too long and was stopped.",
-      });
-      result.failed += 1;
-    }
-
-    let rawUploadDeletedAt = job.rawUploadDeletedAt;
-    if (job.uploadKey && !rawUploadDeletedAt && ["ready", "failed", "expired"].includes(nextStatus)) {
+    } else if (job.status === "ready" && job.expiresAt && job.expiresAt <= now) {
       try {
-        await bucket.delete(job.uploadKey);
-        rawUploadDeletedAt = now;
-        patch.rawUploadDeletedAt = rawUploadDeletedAt;
-        result.deletedUploads += 1;
+        await deleteSiteAssets(env, job.slug);
+        Object.assign(patch, {
+          status: "expired",
+          errorCode: "MAP_EXPIRED",
+          errorMessage: "Map expired after 30 days.",
+        });
+        result.expired += 1;
+        result.deletedMaps += 1;
       } catch (error) {
         result.deletionFailures += 1;
         console.error(
           JSON.stringify({
             level: "error",
-            message: "reaper raw deletion failed",
+            message: "reaper map deletion failed",
             jobId: job.jobId,
             detail: String(error),
           })
@@ -1203,8 +1025,12 @@ async function hmacBytes(secret, value) {
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
 }
 
-async function isProcessorAuthorized(request, env) {
-  const expected = env.PROCESSOR_TOKEN;
+async function hashSecretToken(token, secret) {
+  return bytesToBase64url(await hmacBytes(secret, String(token || "")));
+}
+
+async function isMaintenanceAuthorized(request, env) {
+  const expected = env.MAINTENANCE_TOKEN || env.PROCESSOR_TOKEN;
   if (!expected) return false;
   const provided = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   return constantTimeEqual(new TextEncoder().encode(provided), new TextEncoder().encode(expected));
@@ -1258,6 +1084,40 @@ function htmlResponse(text, status = 200) {
   });
 }
 
+function fullHtmlResponse(title, body, status = 200) {
+  const headers = securityHeaders();
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  return new Response(
+    `<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #101716; color: #f4f7f4; }
+            main { max-width: 42rem; padding: 2rem; }
+            a { color: #7dd3c7; }
+            button { background: #c2410c; color: white; border: 0; border-radius: .4rem; padding: .75rem 1rem; font: inherit; cursor: pointer; }
+            code { word-break: break-all; }
+          </style>
+        </head>
+        <body><main><h1>${escapeHtml(title)}</h1>${body}</main></body>
+      </html>`,
+    { status, headers }
+  );
+}
+
+function expiredMapResponse() {
+  return fullHtmlResponse(
+    "This running map is no longer available",
+    `<p>Shared Runmaps are public for 30 days and can also be deleted earlier by their creator.</p>
+     <p>This link has expired or was deleted. You can create a new running map from a Garmin export.</p>
+     <p><a href="https://runmaps.larsheimann.com/">Create a new map</a></p>`,
+    410
+  );
+}
+
 function errorResponse(errorCode, errorMessage, status) {
   return jsonResponse({ errorCode, errorMessage }, status);
 }
@@ -1305,7 +1165,7 @@ function securityHeaders() {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
     "Content-Security-Policy":
-      "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.r2.cloudflarestorage.com; frame-src 'self' https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+      "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'",
   });
 }
 
