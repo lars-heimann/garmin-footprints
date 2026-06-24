@@ -124,5 +124,7 @@
   "displayName": "Lars",
   "viewerTitle": "Lars' Running Footprints",
   "localOnly": false,
-  "siteUrl": null
+  "siteUrl": null,
+  "viewerEyebrow": "Lars' Running Footprints",
+  "viewerHeadline": "Every run, one GPS point at a time"
 }

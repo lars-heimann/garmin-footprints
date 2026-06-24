@@ -272,6 +272,7 @@ async function main() {
     assert.match(viewerHtml, /Running Footprints/);
     assert.match(viewerHtml, /Five Million GPS Points/);
     assert.match(viewerHtml, /profile-links/);
+    assert.match(viewerHtml, /id="mapEyebrow"/);
     assert.match(viewerHtml, /id="playPause"/);
     assert.doesNotMatch(viewerHtml, /id="replay"/);
     assert.doesNotMatch(viewerHtml, /id="dateRange"/);

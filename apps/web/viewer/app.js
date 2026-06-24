@@ -14,6 +14,7 @@ function mustElement(id, type) {
 
 const canvas = mustElement("scene", HTMLCanvasElement);
 const errorBox = mustElement("error", HTMLParagraphElement);
+const mapEyebrowEl = mustElement("mapEyebrow", HTMLParagraphElement);
 const mapTitleEl = mustElement("mapTitle", HTMLHeadingElement);
 const aboutMapEl = mustElement("aboutMap", HTMLParagraphElement);
 const dateRangeCopyEl = mustElement("dateRangeCopy", HTMLParagraphElement);
@@ -514,8 +515,11 @@ async function loadData() {
 
 function applyMetadata() {
   const title = state.meta.viewerTitle || "Running Footprints";
+  const headline = state.meta.viewerHeadline || title;
+  const eyebrow = state.meta.viewerEyebrow || "Runmaps";
   document.title = title;
-  mapTitleEl.textContent = title;
+  mapEyebrowEl.textContent = eyebrow;
+  mapTitleEl.textContent = headline;
   if (state.meta.displayName) {
     const name = state.meta.displayName;
     aboutMapEl.textContent = `${name}${String(name).toLowerCase().endsWith("s") ? "'" : "'s"} running routes from a Garmin account export. Brighter streets were run more often.`;

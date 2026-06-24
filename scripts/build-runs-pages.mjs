@@ -51,6 +51,12 @@ async function validateArtifact() {
   if (meta.viewerTitle !== "Lars' Running Footprints") {
     throw new Error("meta.json must set the Lars running-footprints title");
   }
+  if (meta.viewerEyebrow !== "Lars' Running Footprints") {
+    throw new Error("meta.json must set the personal Pages eyebrow");
+  }
+  if (meta.viewerHeadline !== "Every run, one GPS point at a time") {
+    throw new Error("meta.json must set the personal Pages headline");
+  }
   if (meta.localOnly !== false) {
     throw new Error("meta.json must mark the static Pages map as public");
   }
