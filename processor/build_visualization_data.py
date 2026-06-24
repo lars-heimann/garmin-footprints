@@ -674,6 +674,14 @@ def copy_template_assets(template_dir: Path, output_dir: Path) -> None:
         shutil.copy2(template_dir / name, output_dir / name)
 
 
+def possessive_title(display_name: str) -> str:
+    name = display_name.strip()
+    if not name:
+        return "Running Footprints"
+    suffix = "'" if name.lower().endswith("s") else "'s"
+    return f"{name}{suffix} Running Footprints"
+
+
 def build_visualization_site(
     export_zip: Path,
     output_dir: Path,
@@ -861,7 +869,7 @@ def build_visualization_site(
         "generatedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "slug": slug,
         "displayName": display_name,
-        "viewerTitle": f"{display_name}'s Running Footprints" if display_name else "Running Footprints",
+        "viewerTitle": possessive_title(display_name),
         "siteUrl": site_url,
         "totalRunSummaries": len(activities),
         "parsedRunActivities": parsed_activities,

@@ -679,7 +679,7 @@ function generateAssets(projected, stats, options) {
     generatedAt: new Date().toISOString(),
     slug: options.slug || "local-preview",
     displayName: options.displayName || "",
-    viewerTitle: options.displayName ? `${options.displayName}'s Running Footprints` : "Running Footprints",
+    viewerTitle: possessiveTitle(options.displayName),
     siteUrl: null,
     totalRunSummaries: stats.activities,
     parsedRunActivities: stats.parsedActivities,
@@ -719,6 +719,12 @@ function generateAssets(projected, stats, options) {
     localOnly: true,
   };
   return { meta, points };
+}
+
+function possessiveTitle(displayName) {
+  const name = String(displayName || "").trim();
+  if (!name) return "Running Footprints";
+  return `${name}${name.toLowerCase().endsWith("s") ? "'" : "'s"} Running Footprints`;
 }
 
 async function parseNestedActivityZip(entry, options, context) {

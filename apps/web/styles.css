@@ -311,6 +311,14 @@ button {
   font-weight: 850;
 }
 
+.secondary-button {
+  min-height: 2.5rem;
+  border: 1px solid #cfd8cf;
+  background: #f9faf5;
+  color: #125f58;
+  padding: 0 0.9rem;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
@@ -379,10 +387,110 @@ button:disabled {
   text-decoration: none;
 }
 
+#deleteLink {
+  display: block;
+  margin-top: 0.65rem;
+  color: #9a3412;
+  overflow-wrap: anywhere;
+  font-weight: 850;
+}
+
 #shareLink:hover,
 #shareLink:focus-visible {
   text-decoration: underline;
   outline: none;
+}
+
+.field-help,
+.preview-copy,
+.publish-copy {
+  color: #586761;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.preview-copy,
+.publish-copy {
+  margin: 0.4rem 0 1rem;
+}
+
+.error-summary {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  padding: 0.85rem 1rem;
+}
+
+.error-summary ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.field-error,
+.field-error input,
+.field-error .file-drop {
+  border-color: #dc2626;
+}
+
+.publish-panel {
+  border-top: 1px solid #e3e7dd;
+  padding-top: 1rem;
+}
+
+.guide-dialog {
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: min(86vh, 52rem);
+  border: 1px solid #d9ded3;
+  border-radius: 8px;
+  padding: 0;
+  color: #17211f;
+}
+
+.guide-dialog::backdrop {
+  background: rgba(8, 12, 12, 0.48);
+}
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e3e7dd;
+  background: #fffefa;
+  padding: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.modal-header button {
+  min-height: 2.4rem;
+  padding: 0 0.8rem;
+}
+
+.modal-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.screenshot-placeholder {
+  align-content: center;
+  gap: 0.65rem;
+  min-height: 10rem;
+  padding: 1rem;
+}
+
+.screenshot-placeholder figcaption {
+  color: #586761;
+  font-size: 0.88rem;
+  font-weight: 650;
 }
 
 .guide-shell {

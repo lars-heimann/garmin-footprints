@@ -401,7 +401,8 @@ function applyMetadata() {
   document.title = title;
   mapTitleEl.textContent = title;
   if (state.meta.displayName) {
-    aboutMapEl.textContent = `${state.meta.displayName}'s running routes from a Garmin account export. Brighter streets were run more often.`;
+    const name = state.meta.displayName;
+    aboutMapEl.textContent = `${name}${String(name).toLowerCase().endsWith("s") ? "'" : "'s"} running routes from a Garmin account export. Brighter streets were run more often.`;
   }
   dateRangeEl.textContent = `${formatMonth(new Date(state.meta.start))} - ${formatMonth(new Date(state.meta.end))}`;
 }
