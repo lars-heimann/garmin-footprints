@@ -53,34 +53,34 @@
             <section class="notice" aria-label="Privacy before upload">
               <h2>Before you choose a file</h2>
               <p>
-                The Garmin ZIP contains private health and location data. This app extracts running GPS tracks in your
-                browser, trims starts and finishes, and previews the result locally. Publishing uploads only
-                <code>meta.json</code> and <code>points.bin</code>.
+                Your Garmin export stays fully on this device while you preview, so your private health data is not sent
+                anywhere. If you publish, only the map dots needed for the shared running footprint are saved on the
+                server. The rest of your Garmin export stays local.
               </p>
             </section>
 
             <fieldset class="checklist" id="previewChecklist">
               <legend>Preview readiness</legend>
               <label>
-                <input id="hasExportZip" name="hasExportZip" type="checkbox" required />
-                <span>I downloaded my Garmin account export ZIP.</span>
-              </label>
-              <label>
                 <input id="understandsBrowserOnly" name="understandsBrowserOnly" type="checkbox" required />
                 <span>I understand my Garmin ZIP stays in this browser.</span>
-              </label>
-              <label>
-                <input id="understandsPublicMap" name="understandsPublicMap" type="checkbox" required />
-                <span>I understand publishing creates a public map for 30 days.</span>
               </label>
             </fieldset>
 
             <label class="wide" for="displayName">
-              Display name <span aria-hidden="true">*</span>
-              <span class="field-help">Shown on the public map and used to generate the URL.</span>
+              <span class="field-label-row">
+                Display name<span aria-hidden="true">*</span>
+                <span
+                  class="info-icon"
+                  tabindex="0"
+                  aria-label="Shown on the public map and used to generate the URL."
+                  data-tooltip="Shown on the public map and used to generate the URL."
+                  >i</span
+                >
+              </span>
               <input id="displayName" name="displayName" maxlength="80" autocomplete="given-name" required />
             </label>
-            <p id="previewUrlText" class="preview-copy">Public URL preview appears after you enter a display name.</p>
+            <p id="previewUrlText" class="preview-copy" hidden></p>
 
             <label class="file-drop">
               <span id="fileLabel">Choose Garmin ZIP</span>
@@ -95,9 +95,16 @@
           <fieldset id="publishFields" class="grid publish-panel" hidden>
             <legend>Step 2: Publish for sharing</legend>
             <p class="wide publish-copy">
-              Your preview is ready. Enter your invite code only when you want a shareable public page. Publishing
-              uploads the generated map files, not your Garmin ZIP, and creates a link that works for 30 days.
+              Your preview is ready. Enter your invite code when you want a shareable public page. Publishing uploads
+              the generated map files, not your Garmin ZIP, and creates a link that works for 30 days.
             </p>
+            <fieldset class="checklist publish-checklist wide" id="publishChecklist">
+              <legend>Publishing readiness</legend>
+              <label>
+                <input id="understandsPublicMap" name="understandsPublicMap" type="checkbox" required />
+                <span>I understand publishing creates a public map for 30 days.</span>
+              </label>
+            </fieldset>
             <label class="wide" for="inviteCode">
               Invite code <span aria-hidden="true">*</span>
               <input id="inviteCode" name="inviteCode" autocomplete="one-time-code" />
@@ -109,7 +116,7 @@
 
           <div class="button-row">
             <button id="previewButton" type="button">Create private preview</button>
-            <button id="publishButton" type="button" hidden>Publish map</button>
+            <button id="publishButton" type="button" hidden>Publish map as website</button>
             <button id="cancelLocalButton" type="button" hidden>Cancel preview</button>
             <button id="clearPreviewButton" type="button" hidden>Clear preview</button>
           </div>
@@ -118,7 +125,15 @@
 
       <aside class="progress-panel" aria-live="polite">
         <h2>Status</h2>
-        <p id="statusText">Waiting for a Garmin ZIP. No invite code is needed for preview.</p>
+        <p id="statusText">Waiting for Garmin ZIP.</p>
+        <div id="processingActivity" class="processing-activity" hidden aria-hidden="true">
+          <div class="processing-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <p>Working locally in this browser. Large Garmin exports can take a little while.</p>
+        </div>
         <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
         <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
         <a id="deleteLink" hidden target="_blank" rel="noopener noreferrer"></a>
@@ -179,7 +194,14 @@
           </figure>
           <figure class="guide-screenshot">
             <img src="./assets/garmin-export/step-07-download-complete.png" alt="Completed Garmin ZIP download" />
-            <figcaption>Upload the main archive containing <code>DI_CONNECT</code>.</figcaption>
+            <figcaption>When the download is complete, use <b>Open In...</b> or find the ZIP in Downloads.</figcaption>
+          </figure>
+          <figure class="guide-screenshot">
+            <img
+              src="./assets/garmin-export/step-08-open-downloads.png"
+              alt="Open the downloaded Garmin ZIP from the phone downloads sheet"
+            />
+            <figcaption>On mobile, use Downloads or Files to find the ZIP when choosing it for upload.</figcaption>
           </figure>
         </div>
       </div>

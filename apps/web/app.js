@@ -25,6 +25,7 @@ const publishButton = mustElement("publishButton", HTMLButtonElement);
 const cancelLocalButton = mustElement("cancelLocalButton", HTMLButtonElement);
 const clearPreviewButton = mustElement("clearPreviewButton", HTMLButtonElement);
 const statusText = mustElement("statusText", HTMLParagraphElement);
+const processingActivity = mustElement("processingActivity", HTMLDivElement);
 const meterFill = mustElement("meterFill", HTMLSpanElement);
 const shareLink = mustElement("shareLink", HTMLAnchorElement);
 const deleteLink = mustElement("deleteLink", HTMLAnchorElement);
@@ -38,6 +39,7 @@ const previewUrlText = mustElement("previewUrlText", HTMLParagraphElement);
 const guideDialog = mustElement("guideDialog", HTMLDialogElement);
 const guideButton = mustElement("guideButton", HTMLButtonElement);
 const closeGuideButton = mustElement("closeGuideButton", HTMLButtonElement);
+const publishPublicMapCheck = mustElement("understandsPublicMap", HTMLInputElement);
 const readinessChecks = Array.from(document.querySelectorAll("#previewChecklist input[type='checkbox']")).map(
   (element) => {
     if (!(element instanceof HTMLInputElement)) throw new Error("Checklist input was not an input element.");
@@ -68,6 +70,7 @@ let turnstileRequired = false;
 let turnstileWidgetId = null;
 let turnstileSiteKey = null;
 let localWorker = null;
+let cancelLocalProcess = null;
 let localPreviewData = null;
 let maxMetaBytes = 1024 * 1024;
 let maxPointsBytes = 32 * 1024 * 1024;
@@ -77,6 +80,12 @@ function setStatus(message, progress = null) {
   if (typeof progress === "number") {
     meterFill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
   }
+}
+
+function setProcessingState(active) {
+  document.body.classList.toggle("is-processing", active);
+  processingActivity.hidden = !active;
+  previewButton.toggleAttribute("aria-busy", active);
 }
 
 function showErrors(errors) {
@@ -157,10 +166,12 @@ function possessiveTitle(displayName) {
 function updatePreviewCopy() {
   const base = slugBaseFromDisplayName(form.displayName.value);
   if (base.length < 2) {
-    previewUrlText.textContent = "Public URL preview appears after you enter a display name.";
+    previewUrlText.textContent = "";
+    previewUrlText.hidden = true;
     return;
   }
   previewUrlText.textContent = `Preview: runmaps.larsheimann.com/m/${base}-9dgf2 · ${possessiveTitle(form.displayName.value)}`;
+  previewUrlText.hidden = false;
 }
 
 function classifyFileError(file) {
@@ -206,6 +217,12 @@ function validatePublish() {
   if (!form.inviteCode.value.trim()) {
     errors.push({ message: "Invite code is required to publish.", element: form.inviteCode });
   }
+  if (!publishPublicMapCheck.checked) {
+    errors.push({
+      message: "Confirm that publishing creates a public map for 30 days.",
+      element: mustElement("publishChecklist", HTMLElement),
+    });
+  }
   if (turnstileRequired && !turnstileToken.value) {
     errors.push({ message: "Complete the browser check before publishing.", element: turnstileSlot });
   }
@@ -239,6 +256,7 @@ function resetLocalWorker() {
     localWorker.terminate();
     localWorker = null;
   }
+  cancelLocalProcess = null;
   cancelLocalButton.hidden = true;
 }
 
@@ -246,10 +264,12 @@ function clearPreview() {
   localPreviewData = null;
   localPreviewPanel.hidden = true;
   localPreviewFrame.removeAttribute("src");
+  previewButton.hidden = false;
   clearPreviewButton.hidden = true;
   publishButton.hidden = true;
   publishFields.hidden = true;
   turnstileSlot.hidden = true;
+  publishPublicMapCheck.checked = false;
   resetTurnstile();
   shareLink.hidden = true;
   deleteLink.hidden = true;
@@ -258,7 +278,8 @@ function clearPreview() {
 function renderLocalPreview(meta, points) {
   localPreviewData = { meta, points };
   localPreviewPanel.hidden = false;
-  clearPreviewButton.hidden = false;
+  previewButton.hidden = true;
+  clearPreviewButton.hidden = true;
   publishButton.hidden = false;
   publishFields.hidden = false;
   ensureTurnstile().catch(() => {
@@ -272,28 +293,40 @@ function processLocally(file) {
   resetLocalWorker();
   clearPreview();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = () => {
+      settled = true;
+      resetLocalWorker();
+    };
     localWorker = new Worker("./browser-processing/processor-worker.js", { type: "module" });
+    cancelLocalProcess = () => {
+      if (settled) return;
+      finish();
+      reject(new DOMException("Processing was canceled.", "AbortError"));
+    };
     cancelLocalButton.hidden = false;
     localWorker.addEventListener("message", (event) => {
+      if (settled) return;
       const { type, progress, meta, points, message } = event.data || {};
       if (type === "progress") {
         setStatus(progress.message || "Processing locally...", phaseProgress(progress.phase));
         return;
       }
       if (type === "complete") {
-        resetLocalWorker();
+        finish();
         renderLocalPreview(meta, points);
-        setStatus("Preview is ready. Check the map below, then publish only if you want to share it.", 100);
+        setStatus("Preview is ready.", 100);
         resolve();
         return;
       }
       if (type === "error") {
-        resetLocalWorker();
+        finish();
         reject(new Error(message || "Local processing failed."));
       }
     });
     localWorker.addEventListener("error", (event) => {
-      resetLocalWorker();
+      if (settled) return;
+      finish();
       reject(new Error(event.message || "Local processing worker failed. Try a modern browser with enough memory."));
     });
     localWorker.postMessage({
@@ -323,6 +356,7 @@ async function previewLocally() {
   const [file] = fileInput.files;
   submitting = true;
   previewButton.textContent = "Processing...";
+  setProcessingState(true);
   setStatus("Starting local processor...", 8);
   try {
     await processLocally(file);
@@ -331,6 +365,7 @@ async function previewLocally() {
     setStatus(error instanceof Error ? error.message : String(error), 0);
   } finally {
     submitting = false;
+    setProcessingState(false);
     previewButton.textContent = "Create private preview";
   }
 }
@@ -412,7 +447,7 @@ async function publishMap() {
     resetTurnstile();
   } finally {
     submitting = false;
-    publishButton.textContent = "Publish map";
+    publishButton.textContent = "Publish map as website";
   }
 }
 
@@ -433,13 +468,16 @@ publishButton.addEventListener("click", () => {
   if (!submitting) publishMap();
 });
 cancelLocalButton.addEventListener("click", () => {
-  localWorker?.postMessage({ type: "cancel" });
-  resetLocalWorker();
-  setStatus("Processing was canceled.", 0);
+  if (cancelLocalProcess) {
+    cancelLocalProcess();
+  } else {
+    resetLocalWorker();
+    setStatus("Processing was canceled.", 0);
+  }
 });
 clearPreviewButton.addEventListener("click", () => {
   clearPreview();
-  setStatus("Waiting for a Garmin ZIP. No invite code is needed for preview.", 0);
+  setStatus("Waiting for Garmin ZIP.", 0);
 });
 guideButton.addEventListener("click", () => guideDialog.showModal());
 closeGuideButton.addEventListener("click", () => guideDialog.close());

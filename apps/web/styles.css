@@ -259,6 +259,7 @@ legend,
 .file-drop {
   display: grid;
   min-height: 5.25rem;
+  margin-top: 0.9rem;
   place-items: center;
   border: 1px dashed #8fa49d;
   border-radius: 8px;
@@ -292,6 +293,63 @@ label:not(.file-drop) {
   color: #4e5d58;
   font-size: 0.86rem;
   font-weight: 750;
+}
+
+.field-label-row {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.info-icon {
+  position: relative;
+  display: inline-grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-left: 0.25rem;
+  place-items: center;
+  border: 1px solid #8fa49d;
+  border-radius: 999px;
+  color: #125f58;
+  cursor: help;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.info-icon:focus-visible {
+  box-shadow: 0 0 0 3px rgba(26, 119, 112, 0.18);
+  outline: none;
+}
+
+.info-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  z-index: 3;
+  width: max-content;
+  max-width: min(18rem, calc(100vw - 3rem));
+  transform: translateX(-50%);
+  border: 1px solid #d9ded3;
+  border-radius: 8px;
+  background: #17211f;
+  color: #fffefa;
+  opacity: 0;
+  padding: 0.55rem 0.65rem;
+  pointer-events: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+  transition: opacity 120ms ease;
+}
+
+.info-icon:hover::after,
+.info-icon:focus::after {
+  opacity: 1;
 }
 
 .wide {
@@ -341,9 +399,28 @@ button:disabled {
   opacity: 0.62;
 }
 
+.is-processing #previewButton {
+  position: relative;
+  overflow: hidden;
+  animation: processing-button-pulse 1.8s ease-in-out infinite;
+}
+
+.is-processing #previewButton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 250, 0.24), transparent);
+  animation: processing-button-sheen 1.7s ease-in-out infinite;
+}
+
 .progress-panel {
   position: static;
   padding: 1rem;
+}
+
+.is-processing .progress-panel {
+  animation: processing-panel-pulse 2.4s ease-in-out infinite;
 }
 
 .local-preview-panel {
@@ -379,6 +456,49 @@ button:disabled {
   line-height: 1.45;
 }
 
+.processing-activity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0 0 1rem;
+  border: 1px solid #d9ded3;
+  border-radius: 8px;
+  background: #f7fbf8;
+  padding: 0.75rem;
+}
+
+.processing-activity p {
+  min-height: 0;
+  color: #34433f;
+  font-size: 0.88rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.processing-dots {
+  display: inline-flex;
+  gap: 0.24rem;
+  align-items: center;
+}
+
+.processing-dots span {
+  display: block;
+  width: 0.52rem;
+  height: 0.52rem;
+  border-radius: 999px;
+  background: #1a7770;
+  animation: processing-dot-bounce 1.05s ease-in-out infinite;
+}
+
+.processing-dots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.processing-dots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
 .meter {
   height: 0.45rem;
   overflow: hidden;
@@ -393,6 +513,11 @@ button:disabled {
   border-radius: inherit;
   background: linear-gradient(90deg, #1a7770, #d9912a);
   transition: width 180ms ease;
+}
+
+.is-processing .meter span {
+  background-size: 200% 100%;
+  animation: processing-meter-flow 1.5s linear infinite;
 }
 
 #shareLink {
@@ -418,7 +543,6 @@ button:disabled {
   outline: none;
 }
 
-.field-help,
 .preview-copy,
 .publish-copy {
   color: #586761;
@@ -475,6 +599,10 @@ button:disabled {
 .publish-panel .publish-copy {
   clear: both;
   padding-top: 1rem;
+}
+
+.publish-checklist {
+  margin: 0;
 }
 
 .guide-dialog {
@@ -572,8 +700,8 @@ button:disabled {
 .guide-screenshot img {
   display: block;
   width: 100%;
-  height: 18rem;
-  object-fit: cover;
+  height: 28rem;
+  object-fit: contain;
   object-position: top center;
   background: #ffffff;
 }
@@ -621,6 +749,72 @@ button:disabled {
   }
 
   .guide-screenshot img {
-    height: 24rem;
+    height: 32rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-processing #previewButton,
+  .is-processing #previewButton::after,
+  .is-processing .progress-panel,
+  .processing-dots span,
+  .is-processing .meter span {
+    animation: none;
+  }
+}
+
+@keyframes processing-dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.45;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 1;
+    transform: translateY(-0.18rem);
+  }
+}
+
+@keyframes processing-meter-flow {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes processing-panel-pulse {
+  0%,
+  100% {
+    box-shadow: 0 20px 55px rgba(22, 33, 31, 0.08);
+  }
+
+  50% {
+    box-shadow: 0 20px 60px rgba(26, 119, 112, 0.16);
+  }
+}
+
+@keyframes processing-button-pulse {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes processing-button-sheen {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(120%);
   }
 }
