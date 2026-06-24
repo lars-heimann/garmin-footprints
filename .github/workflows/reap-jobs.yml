@@ -16,8 +16,8 @@ jobs:
       - name: Trigger authenticated reaper
         env:
           WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
-          PROCESSOR_TOKEN: ${{ secrets.PROCESSOR_TOKEN }}
+          MAINTENANCE_TOKEN: ${{ secrets.MAINTENANCE_TOKEN }}
         run: |
           curl -fsS -X POST \
-            -H "Authorization: Bearer $PROCESSOR_TOKEN" \
-            "$WORKER_API_BASE/api/processor/reap"
+            -H "Authorization: Bearer $MAINTENANCE_TOKEN" \
+            "$WORKER_API_BASE/api/maintenance/reap"

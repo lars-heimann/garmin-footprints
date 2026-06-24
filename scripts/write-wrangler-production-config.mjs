@@ -35,9 +35,6 @@ config.vars = {
   R2_BUCKET_NAME: requiredEnv("R2_BUCKET_NAME"),
   PUBLIC_HOST_SUFFIX: publicHostSuffix,
   PUBLIC_SITE_URL_PATTERN: process.env.PUBLIC_SITE_URL_PATTERN || `https://{slug}.${publicHostSuffix}`,
-  GITHUB_REPOSITORY: requiredEnv("GITHUB_REPOSITORY"),
-  GITHUB_REF: process.env.PROCESSOR_REF || process.env.GITHUB_REF_NAME || "main",
-  GITHUB_WORKFLOW: process.env.PROCESSOR_WORKFLOW || "process-job.yml",
 };
 
 if (process.env.TURNSTILE_SITE_KEY) {

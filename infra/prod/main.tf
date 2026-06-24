@@ -77,7 +77,7 @@ resource "random_password" "upload_token_secret" {
   }
 }
 
-resource "random_password" "processor_token" {
+resource "random_password" "maintenance_token" {
   length  = 48
   special = false
   keepers = {
@@ -139,10 +139,10 @@ resource "github_actions_secret" "upload_token_secret" {
   value       = random_password.upload_token_secret.result
 }
 
-resource "github_actions_secret" "processor_token" {
+resource "github_actions_secret" "maintenance_token" {
   repository  = var.github_repository
-  secret_name = "PROCESSOR_TOKEN"
-  value       = random_password.processor_token.result
+  secret_name = "MAINTENANCE_TOKEN"
+  value       = random_password.maintenance_token.result
 }
 
 resource "github_actions_secret" "turnstile_secret_key" {

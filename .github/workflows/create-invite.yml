@@ -11,7 +11,12 @@ on:
       maxUses:
         description: Maximum uses
         required: true
-        default: "1"
+        default: "200"
+        type: string
+      label:
+        description: Non-secret group label for usage tracking
+        required: true
+        default: Friends
         type: string
 
 permissions:
@@ -49,11 +54,12 @@ jobs:
         env:
           INVITE_CODE: ${{ secrets[inputs.codeSecretName] }}
           MAX_USES: ${{ inputs.maxUses }}
+          INVITE_LABEL: ${{ inputs.label }}
         run: |
           if [ -z "$INVITE_CODE" ]; then
             echo "Invite code secret was empty or missing." >&2
             exit 1
           fi
           echo "::add-mask::$INVITE_CODE"
-          SQL=$(node scripts/create-invite-sql.mjs --code "$INVITE_CODE" --max-uses "$MAX_USES" --secret "$INVITE_HASH_SECRET")
+          SQL=$(node scripts/create-invite-sql.mjs --code "$INVITE_CODE" --label "$INVITE_LABEL" --max-uses "$MAX_USES" --secret "$INVITE_HASH_SECRET")
           npx wrangler d1 execute "$D1_DATABASE_NAME" --config apps/worker/wrangler.prod.generated.jsonc --remote --command "$SQL"

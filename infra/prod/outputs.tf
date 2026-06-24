@@ -36,7 +36,7 @@ output "upload_token_secret" {
   sensitive = true
 }
 
-output "processor_token" {
-  value     = random_password.processor_token.result
+output "maintenance_token" {
+  value     = random_password.maintenance_token.result
   sensitive = true
 }

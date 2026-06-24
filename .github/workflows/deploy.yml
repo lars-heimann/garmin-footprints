@@ -80,10 +80,10 @@ jobs:
         run: |
           INVITE_HASH_SECRET="$(tofu -chdir=infra/prod output -raw invite_hash_secret)"
           UPLOAD_TOKEN_SECRET="$(tofu -chdir=infra/prod output -raw upload_token_secret)"
-          PROCESSOR_TOKEN="$(tofu -chdir=infra/prod output -raw processor_token)"
+          MAINTENANCE_TOKEN="$(tofu -chdir=infra/prod output -raw maintenance_token)"
           echo "::add-mask::$INVITE_HASH_SECRET"
           echo "::add-mask::$UPLOAD_TOKEN_SECRET"
-          echo "::add-mask::$PROCESSOR_TOKEN"
+          echo "::add-mask::$MAINTENANCE_TOKEN"
           {
             echo "R2_BUCKET_NAME=$(tofu -chdir=infra/prod output -raw r2_bucket_name)"
             echo "D1_DATABASE_NAME=$(tofu -chdir=infra/prod output -raw d1_database_name)"
@@ -93,37 +93,25 @@ jobs:
             echo "WORKER_API_BASE=$(tofu -chdir=infra/prod output -raw worker_api_base)"
             echo "INVITE_HASH_SECRET=$INVITE_HASH_SECRET"
             echo "UPLOAD_TOKEN_SECRET=$UPLOAD_TOKEN_SECRET"
-            echo "PROCESSOR_TOKEN=$PROCESSOR_TOKEN"
+            echo "MAINTENANCE_TOKEN=$MAINTENANCE_TOKEN"
           } >> "$GITHUB_ENV"
 
       - name: Generate Wrangler config
         env:
           TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
-          PROCESSOR_REF: main
-          PROCESSOR_WORKFLOW: process-job.yml
         run: node scripts/write-wrangler-production-config.mjs apps/worker/wrangler.prod.generated.jsonc
 
       - name: Upload Worker secrets
         env:
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
-          PROCESSOR_GITHUB_TOKEN: ${{ secrets.PROCESSOR_GITHUB_TOKEN }}
-          R2_UPLOAD_ACCESS_KEY_ID: ${{ secrets.R2_UPLOAD_ACCESS_KEY_ID || secrets.CLOUDFLARE_ACCESS_KEY_R2 }}
-          R2_UPLOAD_SECRET_ACCESS_KEY: ${{ secrets.R2_UPLOAD_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_SECRET_ACCESS_KEY_R2 }}
         run: |
           node - <<'NODE'
           const fs = require("node:fs");
           const secrets = {
             INVITE_HASH_SECRET: process.env.INVITE_HASH_SECRET,
             UPLOAD_TOKEN_SECRET: process.env.UPLOAD_TOKEN_SECRET,
-            PROCESSOR_TOKEN: process.env.PROCESSOR_TOKEN,
-            GITHUB_TOKEN: process.env.PROCESSOR_GITHUB_TOKEN,
+            MAINTENANCE_TOKEN: process.env.MAINTENANCE_TOKEN,
           };
-          if (process.env.R2_UPLOAD_ACCESS_KEY_ID) {
-            secrets.R2_UPLOAD_ACCESS_KEY_ID = process.env.R2_UPLOAD_ACCESS_KEY_ID;
-          }
-          if (process.env.R2_UPLOAD_SECRET_ACCESS_KEY) {
-            secrets.R2_UPLOAD_SECRET_ACCESS_KEY = process.env.R2_UPLOAD_SECRET_ACCESS_KEY;
-          }
           if (process.env.TURNSTILE_SECRET_KEY) {
             secrets.TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY;
           }
@@ -137,9 +125,6 @@ jobs:
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply "$D1_DATABASE_NAME" --config apps/worker/wrangler.prod.generated.jsonc --remote
 
-      - name: Configure R2 CORS
-        run: node scripts/configure-r2-cors.mjs
-
       - name: Deploy Worker
         run: npx wrangler deploy --config apps/worker/wrangler.prod.generated.jsonc
 
@@ -147,4 +132,8 @@ jobs:
         run: tofu -chdir=infra/prod apply -auto-approve
 
       - name: Production smoke test
-        run: curl --fail --show-error --silent --retry 8 --retry-all-errors --retry-delay 5 "$WORKER_API_BASE/api/config"
+        run: |
+          curl --fail --show-error --silent --retry 8 --retry-all-errors --retry-delay 5 "$WORKER_API_BASE/api/config"
+          curl --fail --show-error --silent --retry 8 --retry-all-errors --retry-delay 5 \
+            -H "Authorization: Bearer $MAINTENANCE_TOKEN" \
+            -X POST "$WORKER_API_BASE/api/maintenance/reap"

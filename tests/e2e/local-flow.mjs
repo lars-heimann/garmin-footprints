@@ -6,19 +6,21 @@ import { join, resolve, extname } from "node:path";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import worker, { hashInviteCode } from "../../apps/worker/src/index.js";
+import worker, { hashInviteCode, reapStaleJobs } from "../../apps/worker/src/index.js";
 import { MemoryBucket, MemoryStore } from "../../apps/worker/src/testing.js";
+import { buildVisualizationFromGarminFile } from "../../apps/web/browser-processing/processor-core.js";
 
 const ROOT = resolve(new URL("../..", import.meta.url).pathname);
 const INVITE_SECRET = "e2e-invite-secret";
 const UPLOAD_SECRET = "e2e-upload-secret";
-const PROCESSOR_TOKEN = "e2e-processor-token";
+const MAINTENANCE_TOKEN = "e2e-maintenance-token";
 
 function contentType(path) {
   const ext = extname(path);
   if (ext === ".html") return "text/html; charset=utf-8";
   if (ext === ".js") return "text/javascript; charset=utf-8";
   if (ext === ".css") return "text/css; charset=utf-8";
+  if (ext === ".json") return "application/json; charset=utf-8";
   return "application/octet-stream";
 }
 
@@ -49,10 +51,6 @@ async function startServer(env) {
   const server = createServer(async (incoming, outgoing) => {
     try {
       const effectiveHost = String(incoming.headers["x-test-host"] || incoming.headers.host || "127.0.0.1");
-      if (incoming.method === "PUT" && incoming.url?.startsWith("/__r2/")) {
-        await handleFakeR2PartUpload(incoming, outgoing, env);
-        return;
-      }
       const url = `http://${effectiveHost}${incoming.url}`;
       const headers = new Headers();
       for (const [key, value] of Object.entries(incoming.headers)) {
@@ -103,23 +101,6 @@ async function startServer(env) {
       await new Promise((resolveClose) => server.close(resolveClose));
     },
   };
-}
-
-async function handleFakeR2PartUpload(incoming, outgoing, env) {
-  const url = new URL(`http://127.0.0.1${incoming.url}`);
-  const jobId = decodeURIComponent(url.pathname.replace(/^\/__r2\//, ""));
-  const partNumber = Number(url.searchParams.get("partNumber"));
-  const uploadId = url.searchParams.get("uploadId");
-  const job = env.__TEST_STORE.jobs.get(jobId);
-  if (!job || uploadId !== job.uploadId || !Number.isInteger(partNumber)) {
-    outgoing.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    outgoing.end("Unknown multipart upload");
-    return;
-  }
-  const upload = env.__TEST_BUCKET.resumeMultipartUpload(job.uploadKey, uploadId);
-  const part = await upload.uploadPart(partNumber, incoming);
-  outgoing.writeHead(200, { ETag: part.etag, "Access-Control-Expose-Headers": "ETag" });
-  outgoing.end();
 }
 
 function run(command, args, options = {}) {
@@ -191,7 +172,7 @@ function chromePath() {
   return null;
 }
 
-async function chromeSmoke(basePort, workDir, viewport) {
+async function chromeSmoke(basePort, workDir, slug, viewport) {
   const chrome = chromePath();
   if (!chrome) {
     throw new Error("Chrome was not found for browser smoke tests. Set CHROME_PATH.");
@@ -210,11 +191,11 @@ async function chromeSmoke(basePort, workDir, viewport) {
       "--no-default-browser-check",
       "--timeout=10000",
       `--user-data-dir=${join(workDir, `chrome-${viewport.width}`)}`,
-      `--host-resolver-rules=MAP runner.runs.example.com 127.0.0.1`,
+      `--host-resolver-rules=MAP ${slug}.runs.example.com 127.0.0.1`,
       `--window-size=${viewport.width},${viewport.height}`,
       "--virtual-time-budget=3000",
       `--screenshot=${screenshot}`,
-      `http://runner.runs.example.com:${basePort}/`,
+      `http://${slug}.runs.example.com:${basePort}/`,
     ],
     { timeoutMs: 15000, allowTimeoutFile: screenshot }
   );
@@ -222,10 +203,76 @@ async function chromeSmoke(basePort, workDir, viewport) {
   assert.ok(info.size > 1000, `expected non-empty screenshot for ${viewport.width}x${viewport.height}`);
 }
 
+async function createLocalPreview(exportZip, displayName) {
+  const zipBytes = await readFile(exportZip);
+  const file = new File([zipBytes], "garmin-export.zip", { type: "application/zip" });
+  return buildVisualizationFromGarminFile(file, {
+    displayName,
+    slug: "local-preview",
+    startDate: "2022-05-01",
+    maxPoints: 10000,
+  });
+}
+
+async function assertOk(response) {
+  if (!response.ok) {
+    assert.fail(`expected ${response.url} to succeed, got ${response.status}: ${await response.text()}`);
+  }
+}
+
+async function publishPreview(server, displayName, preview) {
+  const sessionResponse = await fetch(`${server.url}/api/publish-sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      inviteCode: "E2E-CODE",
+      displayName,
+    }),
+  });
+  await assertOk(sessionResponse);
+  const session = await sessionResponse.json();
+  assert.match(session.slug, /^[a-z0-9-]+-[a-z0-9]{5}$/);
+  assert.match(session.deleteUrl, /\/delete\//);
+
+  const metaResponse = await fetch(`${server.url}${session.assetUrls["meta.json"]}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${session.publishToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(preview.meta),
+  });
+  await assertOk(metaResponse);
+
+  const pointsBytes = new Uint8Array(preview.points.buffer, preview.points.byteOffset, preview.points.byteLength);
+  const pointsResponse = await fetch(`${server.url}${session.assetUrls["points.bin"]}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${session.publishToken}`,
+      "Content-Type": "application/octet-stream",
+    },
+    body: pointsBytes,
+  });
+  await assertOk(pointsResponse);
+
+  const completeResponse = await fetch(`${server.url}/api/publish-sessions/${session.jobId}/complete`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.publishToken}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  await assertOk(completeResponse);
+  const complete = await completeResponse.json();
+  assert.equal(complete.status, "ready");
+  return { session, complete };
+}
+
 async function main() {
   const workDir = await mkdtemp(join(tmpdir(), "garmin-footprints-e2e-"));
   const store = new MemoryStore();
-  store.addInvite(await hashInviteCode("E2E-CODE", INVITE_SECRET), 1);
+  store.addInvite(await hashInviteCode("E2E-CODE", INVITE_SECRET), 5, "E2E group");
   const bucket = new MemoryBucket();
   const env = {
     __TEST_STORE: store,
@@ -233,83 +280,36 @@ async function main() {
     ASSETS: staticAssets(join(ROOT, "apps/web")),
     INVITE_HASH_SECRET: INVITE_SECRET,
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
-    PROCESSOR_TOKEN,
+    MAINTENANCE_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.example.com",
-    MAX_ZIP_BYTES: String(8 * 1024 * 1024),
+    PUBLIC_SITE_URL_PATTERN: "https://{slug}.runs.example.com",
     DEFAULT_MAX_POINTS: "10000",
   };
 
   const server = await startServer(env);
-  env.__TEST_R2_UPLOAD_BASE = server.url;
   try {
     const appResponse = await fetch(`${server.url}/`);
     assert.equal(appResponse.status, 200);
-    assert.match(await appResponse.text(), /Garmin ZIP/);
+    const appHtml = await appResponse.text();
+    assert.match(appHtml, /Your Garmin ZIP never leaves your browser/);
+    assert.match(appHtml, /Open Garmin export page/);
+
+    const guideResponse = await fetch(`${server.url}/guide/garmin-export`);
+    assert.equal(guideResponse.status, 404);
+
+    const oldUploadResponse = await fetch(`${server.url}/api/upload-sessions`, { method: "POST" });
+    assert.equal(oldUploadResponse.status, 404);
 
     const exportZip = join(workDir, "garmin.zip");
     await run("python3", ["processor/tests/fixtures.py", exportZip]);
+    const preview = await createLocalPreview(exportZip, "E2E Runner");
+    assert.equal(preview.meta.slug, "local-preview");
+    assert.equal(preview.meta.displayName, "E2E Runner");
+    assert.equal(preview.meta.privacy.rawZipUploaded, undefined);
 
-    const sessionResponse = await fetch(`${server.url}/api/upload-sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        inviteCode: "E2E-CODE",
-        slug: "runner",
-        displayName: "E2E Runner",
-        fileSize: (await stat(exportZip)).size,
-      }),
-    });
-    assert.equal(sessionResponse.status, 200);
-    const session = await sessionResponse.json();
+    const { session } = await publishPreview(server, "E2E Runner", preview);
+    const hostHeaders = { "X-Test-Host": `${session.slug}.runs.example.com` };
 
-    const zipBytes = await readFile(exportZip);
-    const partUrlsResponse = await fetch(`${server.url}/api/uploads/${session.jobId}/parts`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ partNumbers: [1] }),
-    });
-    assert.equal(partUrlsResponse.status, 200);
-    const partUrls = await partUrlsResponse.json();
-    const uploadResponse = await fetch(partUrls.urls[0].url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/zip" },
-      body: zipBytes,
-    });
-    assert.equal(uploadResponse.status, 200);
-    const completeResponse = await fetch(`${server.url}/api/uploads/${session.jobId}/complete`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.uploadToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        size: zipBytes.length,
-        parts: [{ partNumber: 1, etag: uploadResponse.headers.get("etag") }],
-      }),
-    });
-    assert.equal(completeResponse.status, 200);
-
-    const queued = await (await fetch(`${server.url}/api/jobs/${session.jobId}`)).json();
-    assert.equal(queued.status, "queued");
-
-    await run("python3", [
-      "processor/process_job.py",
-      "--job-id",
-      session.jobId,
-      "--api-base",
-      server.url,
-      "--processor-token",
-      PROCESSOR_TOKEN,
-      "--template-dir",
-      join(ROOT, "template"),
-      "--work-dir",
-      workDir,
-    ]);
-
-    const ready = await (await fetch(`${server.url}/api/jobs/${session.jobId}`)).json();
-    assert.equal(ready.status, "ready");
-    assert.equal(ready.siteUrl, "https://runner.runs.example.com");
-    assert.ok(ready.rawUploadDeletedAt);
-    assert.equal(bucket.has(`uploads/${session.jobId}/garmin-export.zip`), false);
-
-    const hostHeaders = { "X-Test-Host": "runner.runs.example.com" };
     const siteResponse = await fetch(`${server.url}/`, { headers: hostHeaders });
     assert.equal(siteResponse.status, 200);
     assert.match(await siteResponse.text(), /Running Footprints/);
@@ -318,10 +318,44 @@ async function main() {
     const points = await (await fetch(`${server.url}/points.bin`, { headers: hostHeaders })).arrayBuffer();
     assert.equal(points.byteLength, meta.pointCount * 12);
     assert.equal(meta.displayName, "E2E Runner");
-    assert.ok(meta.pointCount > 0);
+    assert.equal(meta.slug, session.slug);
+    assert.equal(meta.localOnly, false);
+    assert.equal(meta.privacy.rawZipUploaded, false);
+    assert.equal(meta.privacy.browserProcessed, true);
+    assert.ok(meta.expiresAt);
 
-    await chromeSmoke(server.port, workDir, { width: 1440, height: 900 });
-    await chromeSmoke(server.port, workDir, { width: 390, height: 844 });
+    await chromeSmoke(server.port, workDir, session.slug, { width: 1440, height: 900 });
+    await chromeSmoke(server.port, workDir, session.slug, { width: 390, height: 844 });
+
+    const deletePage = await fetch(
+      session.deleteUrl.replace("https://", `${server.url}/`).replace(".runs.example.com", ""),
+      {
+        headers: { "X-Test-Host": "runs.example.com" },
+      }
+    );
+    assert.equal(deletePage.status, 200);
+    assert.match(await deletePage.text(), /Delete E2E Runner/);
+
+    const deletePath = new URL(session.deleteUrl).pathname;
+    const deleteResponse = await fetch(`${server.url}/api${deletePath}`, {
+      method: "POST",
+      headers: { "X-Test-Host": "runs.example.com" },
+    });
+    assert.equal(deleteResponse.status, 200);
+    assert.equal(bucket.has(`sites/${session.slug}/meta.json`), false);
+    const deletedSite = await fetch(`${server.url}/`, { headers: hostHeaders });
+    assert.equal(deletedSite.status, 410);
+
+    const secondPreview = await createLocalPreview(exportZip, "Expiry Runner");
+    const { session: expirySession } = await publishPreview(server, "Expiry Runner", secondPreview);
+    const expiryJob = store.jobs.get(expirySession.jobId);
+    expiryJob.expiresAt = new Date(Date.now() - 60_000).toISOString();
+    await reapStaleJobs(env, Date.now());
+    assert.equal(bucket.has(`sites/${expirySession.slug}/meta.json`), false);
+    const expiredSite = await fetch(`${server.url}/`, {
+      headers: { "X-Test-Host": `${expirySession.slug}.runs.example.com` },
+    });
+    assert.equal(expiredSite.status, 410);
   } finally {
     await server.close();
     await rm(workDir, { recursive: true, force: true });
