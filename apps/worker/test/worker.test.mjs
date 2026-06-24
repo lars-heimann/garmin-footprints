@@ -146,7 +146,7 @@ test("publishes only derived assets and consumes invite on completion", async ()
   const alphaHash = await hashInviteCode("ALPHA-1", INVITE_SECRET);
   const { session, complete } = await publishReady(env, waitContext());
   assert.equal(complete.status, "ready");
-  assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}`);
+  assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}/`);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).reservedUses, 0);
   assert.equal(env.__TEST_STORE.invites.get(alphaHash).uses, 1);
 
@@ -219,6 +219,9 @@ test("serves shared viewer and data for a published map", async () => {
   env.ASSETS = {
     fetch: async (request) => {
       const path = new URL(request.url).pathname;
+      if (path === "/viewer/index.html") {
+        return new Response(null, { status: 307, headers: { Location: "/viewer/" } });
+      }
       return new Response(`asset:${path}`, {
         headers: { "Content-Type": path.endsWith(".css") ? "text/css" : "text/html" },
       });
@@ -226,9 +229,13 @@ test("serves shared viewer and data for a published map", async () => {
   };
   const { session } = await publishReady(env, waitContext());
 
+  const slashless = await worker.fetch(new Request(`https://runs.example.com/m/${session.slug}`), env, waitContext());
+  assert.equal(slashless.status, 308);
+  assert.equal(slashless.headers.get("Location"), `/m/${session.slug}/`);
+
   const index = await worker.fetch(new Request(`https://runs.example.com/m/${session.slug}/`), env, waitContext());
   assert.equal(index.status, 200);
-  assert.match(await index.text(), /asset:\/viewer\/index\.html/);
+  assert.match(await index.text(), /asset:\/viewer\//);
 
   const meta = await worker.fetch(
     new Request(`https://runs.example.com/m/${session.slug}/meta.json`),

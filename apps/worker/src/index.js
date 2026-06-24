@@ -68,6 +68,9 @@ export async function handleRequest(request, env, ctx = { waitUntil() {} }) {
     }
     const publicMapMatch = publicMapPath(url.pathname);
     if (publicMapMatch) {
+      if (publicMapMatch.redirectPath) {
+        return redirectResponse(`${publicMapMatch.redirectPath}${url.search}`);
+      }
       return await serveGeneratedSite(request, env, publicMapMatch.slug, publicMapMatch.assetPath);
     }
 
@@ -515,7 +518,7 @@ async function serveGeneratedSite(request, env, slug, assetPath = null) {
     if (!env.ASSETS?.fetch) return new Response("Not found", { status: 404 });
     const assetUrl = new URL(request.url);
     assetUrl.hostname = url.hostname;
-    assetUrl.pathname = `/viewer/${path}`;
+    assetUrl.pathname = path === "index.html" ? "/viewer/" : `/viewer/${path}`;
     const response = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
     const secured = withSecurityHeaders(response);
     secured.headers.set("Cache-Control", path === "index.html" ? "public, max-age=60" : "public, max-age=3600");
@@ -822,12 +825,17 @@ function bearerToken(request) {
 
 function siteUrlForSlug(slug, env) {
   if (env.PUBLIC_SITE_URL_PATTERN) {
-    return String(env.PUBLIC_SITE_URL_PATTERN).replaceAll("{slug}", slug);
+    const siteUrl = String(env.PUBLIC_SITE_URL_PATTERN).replaceAll("{slug}", slug);
+    return siteUrl.match(/^https?:\/\/[^/?#]+\/m\/[^/?#]+$/) ? `${siteUrl}/` : siteUrl;
   }
-  return `https://${env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX}/m/${slug}`;
+  return `https://${env.PUBLIC_HOST_SUFFIX || DEFAULT_PUBLIC_HOST_SUFFIX}/m/${slug}/`;
 }
 
 function publicMapPath(pathname) {
+  const slashlessMatch = pathname.match(/^\/m\/([^/]+)$/);
+  if (slashlessMatch && isValidSlug(slashlessMatch[1])) {
+    return { slug: slashlessMatch[1], assetPath: "index.html", redirectPath: `/m/${slashlessMatch[1]}/` };
+  }
   const match = pathname.match(/^\/m\/([^/]+)(?:\/(.*))?$/);
   if (!match || !isValidSlug(match[1])) return null;
   const assetPath = match[2] || "index.html";
@@ -1064,6 +1072,12 @@ function jsonResponse(payload, status = 200) {
     status,
     headers,
   });
+}
+
+function redirectResponse(location, status = 308) {
+  const headers = securityHeaders();
+  headers.set("Location", location);
+  return new Response(null, { status, headers });
 }
 
 function htmlResponse(text, status = 200) {

@@ -27,7 +27,7 @@ function staticAssets(directory) {
   return {
     async fetch(request) {
       const url = new URL(request.url);
-      const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+      const pathname = url.pathname === "/" || url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
       const target = resolve(directory, `.${pathname}`);
       if (!target.startsWith(resolve(directory))) {
         return new Response("Not found", { status: 404 });
@@ -261,7 +261,7 @@ async function main() {
     assert.equal(preview.meta.privacy.rawZipUploaded, undefined);
 
     const { session, complete } = await publishPreview(server, "E2E Runner", preview);
-    assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}`);
+    assert.equal(complete.siteUrl, `https://runs.example.com/m/${session.slug}/`);
 
     const siteResponse = await fetch(`${server.url}/m/${session.slug}/`);
     assert.equal(siteResponse.status, 200);

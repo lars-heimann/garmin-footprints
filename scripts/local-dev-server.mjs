@@ -34,7 +34,7 @@ function staticAssets(directory) {
   return {
     async fetch(request) {
       const url = new URL(request.url);
-      const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
+      const pathname = url.pathname === "/" || url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
       const target = resolve(root, `.${pathname}`);
       if (!target.startsWith(root)) {
         return new Response("Not found", { status: 404 });
@@ -96,7 +96,7 @@ async function main() {
     UPLOAD_TOKEN_SECRET: UPLOAD_SECRET,
     MAINTENANCE_TOKEN,
     PUBLIC_HOST_SUFFIX: "runs.localhost",
-    PUBLIC_SITE_URL_PATTERN: `http://127.0.0.1:${port}/m/{slug}`,
+    PUBLIC_SITE_URL_PATTERN: `http://127.0.0.1:${port}/m/{slug}/`,
     DEFAULT_MAX_POINTS: "900000",
   };
 
@@ -133,7 +133,7 @@ async function main() {
   console.log("Garmin Footprints local server");
   console.log(`Upload app:  http://127.0.0.1:${port}/`);
   console.log(`Invite code: ${LOCAL_INVITE_CODE}`);
-  console.log(`Share URLs:  http://127.0.0.1:${port}/m/{slug}`);
+  console.log(`Share URLs:  http://127.0.0.1:${port}/m/{slug}/`);
   console.log("Garmin ZIPs are processed in the browser; only generated map files publish to the local Worker.");
 
   await new Promise((resolveShutdown) => {
