@@ -22,6 +22,14 @@
             <dt>Runs</dt>
             <dd id="runCount">...</dd>
           </div>
+          <div class="timeline-stat">
+            <dt>Progress</dt>
+            <dd id="currentDate" class="timeline-value">
+              <span id="currentDateLabel">Loading data...</span>
+              <span id="currentProgressLabel"></span>
+            </dd>
+            <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
+          </div>
         </dl>
         <details class="about-map">
           <summary>About this map</summary>
@@ -38,7 +46,7 @@
               Made with
               <a href="https://runmaps.larsheimann.com/" target="_blank" rel="noopener noreferrer">Runmaps</a>
               by
-              <a href="https://larsheimann.com/" target="_blank" rel="noopener noreferrer">Lars</a>. Inspired by
+              <a href="https://larsheimann.com/" target="_blank" rel="noopener noreferrer">Lars</a>. <br />Inspired by
               <a href="https://ontracktrain.com/lab/five-million-gps-points" target="_blank" rel="noopener noreferrer">
                 Five Million GPS Points
               </a>
@@ -86,10 +94,6 @@
       </section>
 
       <div class="status-stack">
-        <section class="status">
-          <p id="currentDate">Loading data...</p>
-          <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
-        </section>
         <button id="shareMap" class="share-fab" type="button" hidden aria-label="Share map">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 3v12"></path>

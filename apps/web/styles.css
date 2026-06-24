@@ -425,7 +425,7 @@ button:disabled {
 
 .local-preview-panel {
   overflow: hidden;
-  height: min(78vh, 48rem);
+  height: min(86vh, 56rem);
   border: 1px solid #d9ded3;
   border-radius: 8px;
   background: #050708;

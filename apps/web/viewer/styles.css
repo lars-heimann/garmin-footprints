@@ -56,7 +56,6 @@ canvas:active {
 }
 
 .summary,
-.status,
 .controls,
 .share-prompt {
   border: 1px solid rgba(244, 241, 232, 0.14);
@@ -82,7 +81,7 @@ canvas:active {
 }
 
 h1 {
-  max-width: 22rem;
+  max-width: 100%;
   margin: 0;
   font-size: clamp(1.55rem, 2.2rem, 3.25rem);
   line-height: 1.04;
@@ -117,6 +116,26 @@ dd {
   font-weight: 700;
   line-height: 1.18;
   white-space: nowrap;
+}
+
+.timeline-stat {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+}
+
+.timeline-stat dd {
+  margin-bottom: 0.55rem;
+}
+
+.timeline-value {
+  display: grid;
+  grid-template-columns: 11.5ch auto;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+
+.timeline-value span {
+  min-width: 0;
 }
 
 .about-map {
@@ -231,18 +250,6 @@ dd {
   display: grid;
   justify-items: end;
   width: min(21rem, calc(100vw - 2rem));
-}
-
-.status {
-  width: 100%;
-  padding: 0.85rem 1rem;
-}
-
-.status p {
-  margin: 0 0 0.65rem;
-  color: #fff8e8;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
 }
 
 .meter {
@@ -451,12 +458,6 @@ input[type="range"] {
 
   .summary {
     width: 100%;
-  }
-
-  .status {
-    width: 100%;
-    min-width: 0;
-    margin-top: 0.75rem;
   }
 
   dl {

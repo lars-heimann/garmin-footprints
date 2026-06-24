@@ -20,7 +20,8 @@ const aboutMapEl = mustElement("aboutMap", HTMLParagraphElement);
 const dateRangeCopyEl = mustElement("dateRangeCopy", HTMLParagraphElement);
 const pointCountEl = mustElement("pointCount", HTMLElement);
 const runCountEl = mustElement("runCount", HTMLElement);
-const currentDateEl = mustElement("currentDate", HTMLParagraphElement);
+const currentDateLabelEl = mustElement("currentDateLabel", HTMLSpanElement);
+const currentProgressLabelEl = mustElement("currentProgressLabel", HTMLSpanElement);
 const meterFill = mustElement("meterFill", HTMLSpanElement);
 const playPause = mustElement("playPause", HTMLButtonElement);
 const resetView = mustElement("resetView", HTMLButtonElement);
@@ -275,7 +276,8 @@ function updateHud() {
   const progressPercent = Math.round(state.progress * 1000) / 10;
   pointCountEl.textContent = `${formatNumber(countVisiblePoints())} / ${formatNumber(state.meta.pointCount)}`;
   runCountEl.textContent = `${formatNumber(countVisibleRuns())} / ${formatNumber(totalRuns())}`;
-  currentDateEl.textContent = `${formatDay(currentDateFromProgress())} - ${progressPercent.toFixed(1)}%`;
+  currentDateLabelEl.textContent = formatDay(currentDateFromProgress());
+  currentProgressLabelEl.textContent = `${progressPercent.toFixed(1)}%`;
   meterFill.style.width = `${state.progress * 100}%`;
   timeSlider.value = String(Math.round(state.progress * 1000));
 }
