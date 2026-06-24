@@ -129,7 +129,10 @@ jobs:
         run: npx wrangler deploy --config apps/worker/wrangler.prod.generated.jsonc
 
       - name: OpenTofu apply Worker routes
-        run: tofu -chdir=infra/prod apply -auto-approve
+        run: |
+          tofu -chdir=infra/prod apply -auto-approve -refresh=false \
+            -target=cloudflare_workers_route.root \
+            -target=cloudflare_workers_route.wildcard
 
       - name: Production smoke test
         run: |
