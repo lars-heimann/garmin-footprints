@@ -12,11 +12,10 @@
     "typecheck": "tsc --noEmit && python3 -m mypy processor scripts",
     "deploy:worker": "wrangler deploy --config apps/worker/wrangler.jsonc",
     "db:migrate:prod": "wrangler d1 migrations apply runmaps --config apps/worker/wrangler.jsonc --remote",
-    "test": "npm run test:worker && npm run test:processor && npm run test:browser-processor && npm run test:e2e:browser-local && npm run test:e2e",
+    "test": "npm run test:worker && npm run test:processor && npm run test:browser-processor && npm run test:e2e",
     "test:worker": "node --test apps/worker/test/*.test.mjs",
     "test:processor": "python3 -m unittest discover -s processor/tests -p 'test_*.py'",
     "test:browser-processor": "node --test apps/web/test/*.test.mjs",
-    "test:e2e:browser-local": "node tests/e2e/browser-local-preview.mjs",
     "test:e2e": "node tests/e2e/local-flow.mjs"
   },
   "devDependencies": {
