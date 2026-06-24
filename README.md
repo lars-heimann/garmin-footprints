@@ -53,7 +53,8 @@ npm run dev:local
 
 Open `http://127.0.0.1:8787/` and use invite code `LOCAL-DEMO`. Local share URLs use `http://{slug}.runs.localhost:8787/`, and uploads are processed automatically by the Python processor.
 
-The Worker API creates signed upload sessions, stores temporary ZIPs in R2, queues jobs, accepts processor callbacks, uploads final assets under `sites/{slug}/`, and serves wildcard hostnames from R2.
+The Worker API creates signed upload sessions, signs direct-to-R2 multipart part URLs for ZIPs up to 1 GB, queues jobs,
+accepts processor callbacks, uploads final assets under `sites/{slug}/`, and serves wildcard hostnames from R2.
 
 ## Production
 

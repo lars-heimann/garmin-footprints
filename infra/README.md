@@ -14,6 +14,9 @@ The first unavoidable manual step is providing credentials to OpenTofu/GitHub Ac
 - `GH_ADMIN_TOKEN` for the GitHub provider to manage repository Actions secrets and variables.
 - `PROCESSOR_GITHUB_TOKEN`, a separate fine-grained GitHub token that can dispatch the processor workflow.
 - R2 S3 credentials for the OpenTofu state backend.
+- R2 S3 credentials for direct browser uploads, stored as `R2_UPLOAD_ACCESS_KEY_ID` and
+  `R2_UPLOAD_SECRET_ACCESS_KEY`. If Cloudflare generated `CLOUDFLARE_ACCESS_KEY_R2` and
+  `CLOUDFLARE_SECRET_ACCESS_KEY_R2`, those names also work in the deploy workflow.
 - A temporary invite-code secret such as `NEXT_INVITE_CODE` before running the invite workflow.
 
 After that, CI can run plan/apply, migrations, Worker deploy, smoke tests, and processor jobs without dashboard clicks.
@@ -54,6 +57,14 @@ Seed these GitHub Actions variables manually before running the workflow because
 The Worker dispatches `.github/workflows/process-job.yml` through the GitHub Actions API after a ZIP upload is accepted.
 Create a fine-grained GitHub token for this repository with Actions write access and store it as the repository secret
 `PROCESSOR_GITHUB_TOKEN`. Do not reuse the broader `GH_ADMIN_TOKEN` at runtime.
+
+## Direct Upload R2 Credentials
+
+The upload app uses browser-to-R2 multipart uploads for Garmin ZIPs up to 1 GB. The Worker keeps the R2 key private and
+uses bucket-scoped R2 S3 credentials to sign short-lived `UploadPart` URLs. Store those credentials as GitHub Actions
+secrets named `R2_UPLOAD_ACCESS_KEY_ID` and `R2_UPLOAD_SECRET_ACCESS_KEY`; alternatively, keep Cloudflare's generated
+`CLOUDFLARE_ACCESS_KEY_R2` and `CLOUDFLARE_SECRET_ACCESS_KEY_R2` names. The deploy workflow uploads them to the Worker as
+Worker secrets.
 
 ## Invite Codes
 

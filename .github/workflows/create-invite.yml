@@ -23,6 +23,7 @@ jobs:
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       INVITE_HASH_SECRET: ${{ secrets.INVITE_HASH_SECRET }}
       R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
       D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
@@ -31,9 +32,9 @@ jobs:
       PUBLIC_SITE_URL_PATTERN: ${{ vars.PUBLIC_SITE_URL_PATTERN }}
       TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm

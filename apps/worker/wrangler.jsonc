@@ -31,7 +31,10 @@
   "vars": {
     "PUBLIC_HOST_SUFFIX": "runmaps.larsheimann.com",
     "PUBLIC_SITE_URL_PATTERN": "https://{slug}.runmaps.larsheimann.com",
-    "MAX_ZIP_BYTES": "104857600",
+    "R2_ACCOUNT_ID": "local",
+    "R2_BUCKET_NAME": "runmaps-app",
+    "MAX_ZIP_BYTES": "1073741824",
+    "MULTIPART_PART_BYTES": "16777216",
     "DEFAULT_START_DATE": "2022-05-01",
     "DEFAULT_MAX_POINTS": "900000",
   },

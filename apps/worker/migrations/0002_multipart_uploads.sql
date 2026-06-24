@@ -1,0 +1,7 @@
+ALTER TABLE invites ADD COLUMN reserved_uses INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN upload_mode TEXT;
+ALTER TABLE jobs ADD COLUMN upload_id TEXT;
+ALTER TABLE jobs ADD COLUMN upload_size INTEGER;
+ALTER TABLE jobs ADD COLUMN upload_part_size INTEGER;
+ALTER TABLE jobs ADD COLUMN upload_expires_at TEXT;
+ALTER TABLE jobs ADD COLUMN invite_use_state TEXT;

@@ -19,6 +19,7 @@ export default [
       "node_modules/**",
       ".wrangler/**",
       "coverage/**",
+      "apps/web/vendor/**",
       "infra/**/.terraform/**",
       "processor/**/__pycache__/**",
     ],

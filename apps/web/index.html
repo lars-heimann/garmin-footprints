@@ -16,9 +16,13 @@
             Raw ZIP uploads are used only for processing and are deleted after success or failure. Starts and finishes
             are trimmed before the public map is generated.
           </p>
+          <div class="mode-switch" role="group" aria-label="Processing mode">
+            <button id="localModeButton" type="button" class="mode-button active">Preview locally</button>
+            <button id="uploadModeButton" type="button" class="mode-button">Upload for sharing</button>
+          </div>
         </div>
 
-        <form id="uploadForm" class="upload-panel">
+        <form id="uploadForm" class="upload-panel" novalidate>
           <fieldset>
             <legend>Garmin export</legend>
             <ol class="guide">
@@ -53,6 +57,10 @@
                 trims starts and finishes, deletes the raw ZIP after processing succeeds or fails, and publishes only
                 the generated map assets at your chosen slug URL.
               </p>
+              <p id="localPrivacyCopy">
+                Local preview keeps the raw ZIP in this browser tab. Nothing is uploaded, and the preview disappears
+                when you refresh or clear it.
+              </p>
             </section>
 
             <details class="help-section">
@@ -60,14 +68,14 @@
               <ul>
                 <li>Upload the full Garmin account export ZIP.</li>
                 <li>Do not unzip it.</li>
-                <li>The current direct-upload limit is 100 MB.</li>
+                <li>The current direct-upload limit is 1 GB.</li>
                 <li>Do not upload a single .fit, .gpx, .tcx, or activity export.</li>
                 <li>Do not upload a Strava export.</li>
                 <li>If Garmin gives multiple files, upload the main account export archive containing DI_CONNECT.</li>
               </ul>
             </details>
 
-            <fieldset class="checklist">
+            <fieldset class="checklist" id="uploadChecklist">
               <legend>Upload readiness</legend>
               <label>
                 <input id="hasExportZip" name="hasExportZip" type="checkbox" required />
@@ -89,7 +97,7 @@
             </label>
           </fieldset>
 
-          <fieldset class="grid">
+          <fieldset class="grid" id="publishFields">
             <legend>Public map</legend>
             <label>
               Invite code
@@ -108,7 +116,11 @@
           <div id="turnstileSlot" class="turnstile-slot" hidden></div>
           <input id="turnstileToken" name="turnstileToken" type="hidden" />
 
-          <button id="submitButton" type="submit">Start upload</button>
+          <div class="button-row">
+            <button id="submitButton" type="submit">Preview locally</button>
+            <button id="cancelLocalButton" type="button" hidden>Cancel</button>
+            <button id="clearPreviewButton" type="button" hidden>Clear preview</button>
+          </div>
         </form>
       </section>
 
@@ -118,6 +130,10 @@
         <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
         <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
       </aside>
+
+      <section id="localPreviewPanel" class="local-preview-panel" hidden>
+        <iframe id="localPreviewFrame" title="Local running footprint preview"></iframe>
+      </section>
     </main>
 
     <script src="./app.js"></script>

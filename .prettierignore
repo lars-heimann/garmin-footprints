@@ -5,6 +5,7 @@ node_modules
 .terraform
 infra/**/.terraform
 coverage
+apps/web/vendor
 processor/**/__pycache__
 *.pyc
 Implementation plan.md

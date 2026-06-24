@@ -20,5 +20,5 @@
     "tests/**/*.mjs",
     "eslint.config.js"
   ],
-  "exclude": ["node_modules", ".wrangler", "infra/**/.terraform"]
+  "exclude": ["node_modules", ".wrangler", "apps/web/vendor/**", "infra/**/.terraform"]
 }
