@@ -6,8 +6,9 @@ const root = dirname(fileURLToPath(new URL("../package.json", import.meta.url)))
 const outputDir = join(root, "dist", "runs-pages");
 const viewerDir = join(root, "apps", "web", "viewer");
 const dataDir = join(root, "sites", "runs");
-const requiredFiles = ["index.html", "app.js", "styles.css", "meta.json", "points.bin", ".nojekyll"];
+const requiredFiles = ["index.html", "app.js", "styles.css", "meta.json", "points.bin", ".nojekyll", "404.html"];
 const runsPageTitle = "Lars' Running Footprints";
+const runsPageUrl = "https://runs.larsheimann.com/";
 const runsPageDescription =
   "Explore Lars Heimann's running routes as an interactive map, then try Lars' Garmin RunMaps yourself.";
 
@@ -22,6 +23,7 @@ async function copyArtifact() {
     await copyFile(join(dataDir, file), join(outputDir, file));
   }
   await writeRunsPageMetadata();
+  await writeRunsPageRedirect();
   await writeFile(join(outputDir, ".nojekyll"), "");
 }
 
@@ -45,6 +47,10 @@ async function writeRunsPageMetadata() {
         `<meta property="og:description" content="${runsPageDescription}" />`
       )
       .replace(
+        /<meta\s+name="twitter:card"\s+content="summary"\s*\/>/,
+        `<link rel="canonical" href="${runsPageUrl}" />\n    <meta property="og:url" content="${runsPageUrl}" />\n    <meta name="twitter:card" content="summary" />`
+      )
+      .replace(
         /<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/>/,
         `<meta name="twitter:title" content="${runsPageTitle}" />`
       )
@@ -52,6 +58,28 @@ async function writeRunsPageMetadata() {
         /<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/>|<meta\s+name="twitter:description"[\s\S]*?\/>/,
         `<meta name="twitter:description" content="${runsPageDescription}" />`
       )
+  );
+}
+
+async function writeRunsPageRedirect() {
+  await writeFile(
+    join(outputDir, "404.html"),
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <meta http-equiv="refresh" content="0; url=${runsPageUrl}" />
+    <title>Redirecting to ${runsPageTitle}</title>
+    <script>
+      location.replace(${JSON.stringify(runsPageUrl)});
+    </script>
+  </head>
+  <body>
+    <p><a href="${runsPageUrl}">Open ${runsPageTitle}</a></p>
+  </body>
+</html>
+`
   );
 }
 
@@ -100,8 +128,8 @@ async function validateArtifact() {
   if (meta.localOnly !== false) {
     throw new Error("meta.json must mark the static Pages map as public");
   }
-  if (meta.siteUrl !== null) {
-    throw new Error("meta.json must keep siteUrl null until the custom domain cutover");
+  if (meta.siteUrl !== runsPageUrl) {
+    throw new Error("meta.json must set the live runs page URL");
   }
   if (!Number.isInteger(meta.pointCount) || meta.pointCount <= 0) {
     throw new Error("meta.json pointCount must be a positive integer");
@@ -125,6 +153,17 @@ async function validateArtifact() {
   }
   if (!html.includes(`content="${runsPageDescription}"`)) {
     throw new Error("runs Pages artifact must set the Lars page description");
+  }
+  if (!html.includes(`<link rel="canonical" href="${runsPageUrl}" />`)) {
+    throw new Error("runs Pages artifact must set the canonical URL");
+  }
+  if (!html.includes(`<meta property="og:url" content="${runsPageUrl}" />`)) {
+    throw new Error("runs Pages artifact must set the Open Graph URL");
+  }
+
+  const redirectHtml = await readFile(join(outputDir, "404.html"), "utf8");
+  if (!redirectHtml.includes(`location.replace(${JSON.stringify(runsPageUrl)})`)) {
+    throw new Error("runs Pages 404 must redirect unknown paths to the canonical URL");
   }
 }
 

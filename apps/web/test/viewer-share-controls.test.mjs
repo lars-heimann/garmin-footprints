@@ -27,3 +27,11 @@ test("viewer keeps share controls hidden until a public map is loaded", async ()
   assert.match(app, /mapCta\.classList\.add\("is-collapsed"\)/);
   assert.match(app, /if \(!isPublicViewer\(\)\) return;/);
 });
+
+test("viewer shares the canonical URL without turning copy into a path", async () => {
+  const app = await readWebFile("viewer/app.js");
+
+  assert.match(app, /return state\.meta\?\.siteUrl \|\| window\.location\.href;/);
+  assert.match(app, /navigator\.share\(\{ title, url \}\)/);
+  assert.doesNotMatch(app, /My running footprints map/);
+});

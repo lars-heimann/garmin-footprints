@@ -181,7 +181,7 @@ async function shareCurrentMap() {
   const title = state.meta?.viewerTitle || document.title || "Running Footprints";
   try {
     if (navigator.share) {
-      await navigator.share({ title, text: "My running footprints map", url });
+      await navigator.share({ title, url });
       showShareFeedback("Share menu opened.");
       return;
     }
