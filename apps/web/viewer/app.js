@@ -77,6 +77,10 @@ const state = {
     endZoom: 1,
     startPan: [0, 0],
     endPan: [0, 0],
+    cameraZoom: 1,
+    cameraPan: [0, 0],
+    maxFrameMs: 34,
+    elapsedMs: 0,
     previewProgress: 1,
     playFromProgress: 0.04,
     hudRevealStartedAt: null,
@@ -317,7 +321,9 @@ function updateHud() {
 
 function setPlaybackState(playing) {
   state.playing = playing;
-  if (state.progress >= 1) {
+  if (state.intro.active) {
+    playPause.textContent = state.playing ? "Pause" : "Play";
+  } else if (state.progress >= 1) {
     playPause.textContent = "Replay";
   } else {
     playPause.textContent = state.playing ? "Pause" : "Play";
@@ -399,33 +405,41 @@ function startIntro() {
   state.intro.active = true;
   state.intro.startedAt = null;
   state.intro.hudRevealStartedAt = null;
+  state.intro.elapsedMs = 0;
   state.intro.endZoom = 1;
   state.intro.endPan = [0, 0];
   state.intro.startPan = [0, 0];
-  state.zoom = state.intro.startZoom;
-  state.pan = [...state.intro.startPan];
+  state.intro.cameraZoom = state.intro.startZoom;
+  state.intro.cameraPan = [...state.intro.startPan];
+  state.zoom = 1;
+  state.pan = [0, 0];
   state.progress = state.intro.previewProgress;
-  state.playing = false;
-  playPause.textContent = "Pause";
+  state.playing = true;
+  setPlaybackState(true);
   setIntroClass(true);
   hideIntroHud();
   state.needsRender = true;
 }
 
-function finishIntro({ interrupted = false } = {}) {
+function finishIntro() {
   if (!state.intro.active) return;
   state.intro.active = false;
   state.intro.startedAt = null;
-  state.zoom = state.intro.endZoom;
-  state.pan = [...state.intro.endPan];
-  state.progress = interrupted ? state.progress : state.intro.playFromProgress;
+  state.intro.cameraZoom = state.intro.endZoom;
+  state.intro.cameraPan = [...state.intro.endPan];
+  state.progress = Math.min(state.progress, state.intro.playFromProgress);
   setIntroClass(false);
   showIntroHud();
-  setPlaybackState(!interrupted);
+  setPlaybackState(state.playing);
 }
 
-function cancelIntro() {
-  finishIntro({ interrupted: true });
+function currentCamera() {
+  const introZoom = state.intro.active ? state.intro.cameraZoom : state.intro.endZoom;
+  const introPan = state.intro.active ? state.intro.cameraPan : state.intro.endPan;
+  return {
+    zoom: introZoom * state.zoom,
+    pan: [introPan[0] + state.pan[0] / introZoom, introPan[1] + state.pan[1] / introZoom],
+  };
 }
 
 function resize() {
@@ -449,11 +463,12 @@ function render() {
   gl.useProgram(state.program);
 
   const aspect = canvas.width / canvas.height;
-  const pointSize = Math.max(1.15, Math.min(2.8, 1.55 * Math.sqrt(state.zoom)));
+  const camera = currentCamera();
+  const pointSize = Math.max(1.15, Math.min(2.8, 1.55 * Math.sqrt(camera.zoom)));
 
   gl.uniform1f(gl.getUniformLocation(state.program, "u_progress"), state.progress);
-  gl.uniform1f(gl.getUniformLocation(state.program, "u_zoom"), state.zoom);
-  gl.uniform2f(gl.getUniformLocation(state.program, "u_pan"), state.pan[0], state.pan[1]);
+  gl.uniform1f(gl.getUniformLocation(state.program, "u_zoom"), camera.zoom);
+  gl.uniform2f(gl.getUniformLocation(state.program, "u_pan"), camera.pan[0], camera.pan[1]);
   gl.uniform1f(gl.getUniformLocation(state.program, "u_aspect"), aspect);
   gl.uniform1f(gl.getUniformLocation(state.program, "u_point_size"), pointSize);
 
@@ -468,18 +483,23 @@ function frame(now) {
 
   if (state.intro.active) {
     if (state.intro.startedAt === null) state.intro.startedAt = now;
-    const introElapsed = now - state.intro.startedAt;
+    if (state.playing) {
+      state.intro.elapsedMs += Math.min(elapsed, state.intro.maxFrameMs);
+    }
+    const introElapsed = state.intro.elapsedMs;
     const cameraT = Math.min(1, introElapsed / state.intro.durationMs);
     const zoomT = easeInOutCubic(cameraT);
     const panT = easeOutCubic(cameraT);
     const playbackT = Math.max(0, introElapsed - state.intro.playbackDelayMs) / 1200;
 
-    state.zoom = mixNumber(state.intro.startZoom, state.intro.endZoom, zoomT);
-    state.pan = [
+    state.intro.cameraZoom = mixNumber(state.intro.startZoom, state.intro.endZoom, zoomT);
+    state.intro.cameraPan = [
       mixNumber(state.intro.startPan[0], state.intro.endPan[0], panT),
       mixNumber(state.intro.startPan[1], state.intro.endPan[1], panT),
     ];
-    state.progress = mixNumber(state.intro.previewProgress, state.intro.playFromProgress, Math.min(1, playbackT));
+    if (state.playing) {
+      state.progress = mixNumber(state.intro.previewProgress, state.intro.playFromProgress, Math.min(1, playbackT));
+    }
     if (introElapsed >= state.intro.hudDelayMs) {
       updateIntroHud(now);
     }
@@ -502,7 +522,6 @@ function frame(now) {
 }
 
 function resetCamera() {
-  cancelIntro();
   state.zoom = 1;
   state.pan = [0, 0];
   state.needsRender = true;
@@ -567,7 +586,10 @@ function endPointer(event) {
 
 function bindControls() {
   playPause.addEventListener("click", () => {
-    cancelIntro();
+    if (state.intro.active) {
+      setPlaybackState(!state.playing);
+      return;
+    }
     if (state.progress >= 1) {
       state.progress = 0;
       setPlaybackState(true);
@@ -582,14 +604,13 @@ function bindControls() {
   closeSharePrompt.addEventListener("click", dismissSharePrompt);
 
   timeSlider.addEventListener("input", () => {
-    cancelIntro();
+    finishIntro();
     state.progress = Number(timeSlider.value) / 1000;
     setPlaybackState(false);
   });
 
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    cancelIntro();
     state.activePointers.set(event.pointerId, event);
     state.dragging = state.activePointers.size === 1;
     state.lastPointer = [event.clientX, event.clientY];
@@ -620,7 +641,6 @@ function bindControls() {
     "wheel",
     (event) => {
       event.preventDefault();
-      cancelIntro();
       const delta = Math.exp(-event.deltaY * 0.0012);
       state.zoom = Math.max(0.6, Math.min(120, state.zoom * delta));
       state.needsRender = true;
