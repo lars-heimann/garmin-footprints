@@ -31,6 +31,25 @@ const sharePromptButton = mustElement("sharePromptButton", HTMLButtonElement);
 const closeSharePrompt = mustElement("closeSharePrompt", HTMLButtonElement);
 const shareFeedback = mustElement("shareFeedback", HTMLParagraphElement);
 const timeSlider = mustElement("timeSlider", HTMLInputElement);
+const summaryPanel = document.querySelector(".summary");
+const controlsPanel = document.querySelector(".controls");
+const statusStackPanel = document.querySelector(".status-stack");
+const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+const query = new URLSearchParams(window.location.search);
+
+if (
+  !(summaryPanel instanceof HTMLElement) ||
+  !(controlsPanel instanceof HTMLElement) ||
+  !(statusStackPanel instanceof HTMLElement)
+) {
+  throw new Error("Missing viewer HUD panels.");
+}
+
+const introHudItems = [
+  { element: summaryPanel, delayMs: 0, x: -28.8, y: 0 },
+  { element: controlsPanel, delayMs: 180, x: 0, y: 25.6 },
+  { element: statusStackPanel, delayMs: 320, x: 22.4, y: 0 },
+];
 
 const state = {
   gl: null,
@@ -48,6 +67,20 @@ const state = {
   pinchDistance: null,
   lastFrame: performance.now(),
   needsRender: true,
+  intro: {
+    active: false,
+    startedAt: null,
+    durationMs: 5600,
+    hudDelayMs: 5750,
+    playbackDelayMs: 6800,
+    startZoom: 28,
+    endZoom: 1,
+    startPan: [0, 0],
+    endPan: [0, 0],
+    previewProgress: 1,
+    playFromProgress: 0.04,
+    hudRevealStartedAt: null,
+  },
 };
 
 function isPublicViewer() {
@@ -293,6 +326,108 @@ function setPlaybackState(playing) {
   state.needsRender = true;
 }
 
+function easeInOutCubic(value) {
+  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - value, 3);
+}
+
+function mixNumber(start, end, amount) {
+  return start + (end - start) * amount;
+}
+
+function introEnabled() {
+  if (query.get("intro") === "0") return false;
+  if (motionQuery.matches) return false;
+  return true;
+}
+
+function setIntroClass(active) {
+  document.body.classList.toggle("is-intro", active);
+  document.body.classList.toggle("is-intro-hidden", active);
+  document.body.classList.toggle("is-intro-hud-visible", !active);
+}
+
+function setHudItemStyle(item, amount) {
+  const eased = easeOutCubic(amount);
+  item.element.style.opacity = String(eased);
+  item.element.style.visibility = amount <= 0 ? "hidden" : "visible";
+  item.element.style.transform = `translate(${item.x * (1 - eased)}px, ${item.y * (1 - eased)}px)`;
+}
+
+function hideIntroHud() {
+  for (const item of introHudItems) {
+    setHudItemStyle(item, 0);
+  }
+}
+
+function showIntroHud() {
+  for (const item of introHudItems) {
+    item.element.style.opacity = "1";
+    item.element.style.visibility = "visible";
+    item.element.style.transform = "translate(0, 0)";
+  }
+}
+
+function updateIntroHud(now) {
+  if (state.intro.hudRevealStartedAt === null) {
+    state.intro.hudRevealStartedAt = now;
+    document.body.classList.remove("is-intro-hidden");
+    document.body.classList.add("is-intro-hud-visible");
+  }
+
+  const elapsed = now - state.intro.hudRevealStartedAt;
+  for (const item of introHudItems) {
+    const amount = Math.max(0, Math.min(1, (elapsed - item.delayMs) / 720));
+    setHudItemStyle(item, amount);
+  }
+}
+
+function startIntro() {
+  if (!introEnabled()) {
+    setIntroClass(false);
+    showIntroHud();
+    state.intro.active = false;
+    state.progress = 0;
+    resetCamera();
+    setPlaybackState(true);
+    return;
+  }
+
+  state.intro.active = true;
+  state.intro.startedAt = null;
+  state.intro.hudRevealStartedAt = null;
+  state.intro.endZoom = 1;
+  state.intro.endPan = [0, 0];
+  state.intro.startPan = [0, 0];
+  state.zoom = state.intro.startZoom;
+  state.pan = [...state.intro.startPan];
+  state.progress = state.intro.previewProgress;
+  state.playing = false;
+  playPause.textContent = "Pause";
+  setIntroClass(true);
+  hideIntroHud();
+  state.needsRender = true;
+}
+
+function finishIntro({ interrupted = false } = {}) {
+  if (!state.intro.active) return;
+  state.intro.active = false;
+  state.intro.startedAt = null;
+  state.zoom = state.intro.endZoom;
+  state.pan = [...state.intro.endPan];
+  state.progress = interrupted ? state.progress : state.intro.playFromProgress;
+  setIntroClass(false);
+  showIntroHud();
+  setPlaybackState(!interrupted);
+}
+
+function cancelIntro() {
+  finishIntro({ interrupted: true });
+}
+
 function resize() {
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
@@ -331,7 +466,28 @@ function frame(now) {
   const elapsed = now - state.lastFrame;
   state.lastFrame = now;
 
-  if (state.playing) {
+  if (state.intro.active) {
+    if (state.intro.startedAt === null) state.intro.startedAt = now;
+    const introElapsed = now - state.intro.startedAt;
+    const cameraT = Math.min(1, introElapsed / state.intro.durationMs);
+    const zoomT = easeInOutCubic(cameraT);
+    const panT = easeOutCubic(cameraT);
+    const playbackT = Math.max(0, introElapsed - state.intro.playbackDelayMs) / 1200;
+
+    state.zoom = mixNumber(state.intro.startZoom, state.intro.endZoom, zoomT);
+    state.pan = [
+      mixNumber(state.intro.startPan[0], state.intro.endPan[0], panT),
+      mixNumber(state.intro.startPan[1], state.intro.endPan[1], panT),
+    ];
+    state.progress = mixNumber(state.intro.previewProgress, state.intro.playFromProgress, Math.min(1, playbackT));
+    if (introElapsed >= state.intro.hudDelayMs) {
+      updateIntroHud(now);
+    }
+    if (cameraT >= 1 && playbackT >= 1) {
+      finishIntro();
+    }
+    state.needsRender = true;
+  } else if (state.playing) {
     state.progress = Math.min(1, state.progress + elapsed / 18000);
     if (state.progress >= 1) {
       setPlaybackState(false);
@@ -346,6 +502,7 @@ function frame(now) {
 }
 
 function resetCamera() {
+  cancelIntro();
   state.zoom = 1;
   state.pan = [0, 0];
   state.needsRender = true;
@@ -410,6 +567,7 @@ function endPointer(event) {
 
 function bindControls() {
   playPause.addEventListener("click", () => {
+    cancelIntro();
     if (state.progress >= 1) {
       state.progress = 0;
       setPlaybackState(true);
@@ -424,12 +582,14 @@ function bindControls() {
   closeSharePrompt.addEventListener("click", dismissSharePrompt);
 
   timeSlider.addEventListener("input", () => {
+    cancelIntro();
     state.progress = Number(timeSlider.value) / 1000;
     setPlaybackState(false);
   });
 
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
+    cancelIntro();
     state.activePointers.set(event.pointerId, event);
     state.dragging = state.activePointers.size === 1;
     state.lastPointer = [event.clientX, event.clientY];
@@ -460,6 +620,7 @@ function bindControls() {
     "wheel",
     (event) => {
       event.preventDefault();
+      cancelIntro();
       const delta = Math.exp(-event.deltaY * 0.0012);
       state.zoom = Math.max(0.6, Math.min(120, state.zoom * delta));
       state.needsRender = true;
@@ -564,7 +725,7 @@ async function main() {
     maybeShowSharePrompt();
     initializeGl();
     bindControls();
-    setPlaybackState(true);
+    startIntro();
     requestAnimationFrame(frame);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
