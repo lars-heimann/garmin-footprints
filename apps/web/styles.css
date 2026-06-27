@@ -89,6 +89,46 @@ h1 {
   line-height: 1.55;
 }
 
+.personal-runs-preview {
+  overflow: hidden;
+  border: 1px solid #17211f;
+  border-radius: 8px;
+  background: #050708;
+  box-shadow: 0 24px 70px rgba(22, 33, 31, 0.18);
+}
+
+.preview-copy-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 250, 0.12);
+  padding: 0.65rem 1rem;
+}
+
+.preview-copy-block .eyebrow {
+  margin: 0;
+}
+
+.preview-copy-block .eyebrow {
+  color: #f0bd5f;
+}
+
+.runs-preview-frame {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: #050708;
+}
+
+.runs-preview-frame iframe {
+  display: block;
+  width: 100%;
+  height: clamp(34rem, 72vh, 48rem);
+  border: 0;
+}
+
 .mode-switch,
 .button-row {
   display: flex;
@@ -135,6 +175,7 @@ fieldset {
 legend,
 .progress-panel h2,
 .notice h2,
+.content-section h2,
 .doc-page h2 {
   margin: 0 0 0.75rem;
   color: #17211f;
@@ -191,6 +232,7 @@ legend,
 }
 
 .notice p,
+.content-section p,
 .doc-page p,
 .doc-page li,
 .doc-page dd {
@@ -200,6 +242,78 @@ legend,
 
 .notice p {
   margin: 0;
+}
+
+.content-section {
+  border-top: 1px solid #e3e7dd;
+  padding-top: 1.25rem;
+}
+
+.content-section h2 {
+  max-width: 28rem;
+}
+
+.content-section .eyebrow {
+  margin-bottom: 0.55rem;
+}
+
+.faq-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.faq-grid details {
+  border: 1px solid #d9ded3;
+  border-radius: 8px;
+  background: #fffefa;
+  padding: 0.85rem 0.95rem;
+}
+
+.faq-grid summary {
+  cursor: pointer;
+  color: #17211f;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.faq-grid summary:focus-visible {
+  color: #125f58;
+  outline: none;
+}
+
+.faq-grid p {
+  margin: 0.65rem 0 0;
+}
+
+.site-footer {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid #e3e7dd;
+  padding: 1.25rem 0 0.5rem;
+  color: #586761;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+.footer-title {
+  color: #17211f;
+  font-weight: 850;
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.fine-print {
+  color: #6c7873;
+  font-size: 0.82rem;
 }
 
 .step-copy,
@@ -739,6 +853,15 @@ button:disabled {
 }
 
 @media (max-width: 560px) {
+  h1 {
+    font-size: 2rem;
+    line-height: 1.05;
+  }
+
+  .privacy {
+    font-size: 0.96rem;
+  }
+
   .grid {
     grid-template-columns: 1fr;
   }

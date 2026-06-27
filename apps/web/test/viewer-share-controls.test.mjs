@@ -17,9 +17,13 @@ test("viewer keeps share controls hidden until a public map is loaded", async ()
     readWebFile("viewer/app.js"),
   ]);
 
+  assert.match(html, /id="mapCta"[^>]*hidden/);
+  assert.match(html, /id="collapseMapCta"/);
   assert.match(html, /id="shareMap"[^>]*hidden/);
   assert.match(html, /id="sharePrompt"[^>]*hidden/);
   assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important\s*;[^}]*\}/s);
   assert.match(app, /return window\.parent === window && !state\.meta\?\.localOnly;/);
+  assert.match(app, /if \(!label \|\| !href\) \{/);
+  assert.match(app, /mapCta\.classList\.add\("is-collapsed"\)/);
   assert.match(app, /if \(!isPublicViewer\(\)\) return;/);
 });

@@ -25,6 +25,10 @@ const currentProgressLabelEl = mustElement("currentProgressLabel", HTMLSpanEleme
 const meterFill = mustElement("meterFill", HTMLSpanElement);
 const playPause = mustElement("playPause", HTMLButtonElement);
 const resetView = mustElement("resetView", HTMLButtonElement);
+const mapCta = mustElement("mapCta", HTMLElement);
+const collapseMapCta = mustElement("collapseMapCta", HTMLButtonElement);
+const mapCtaCopy = mustElement("mapCtaCopy", HTMLParagraphElement);
+const mapCtaLink = mustElement("mapCtaLink", HTMLAnchorElement);
 const shareMap = mustElement("shareMap", HTMLButtonElement);
 const sharePrompt = mustElement("sharePrompt", HTMLElement);
 const sharePromptButton = mustElement("sharePromptButton", HTMLButtonElement);
@@ -36,6 +40,8 @@ const controlsPanel = document.querySelector(".controls");
 const statusStackPanel = document.querySelector(".status-stack");
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 const query = new URLSearchParams(window.location.search);
+
+document.body.classList.toggle("is-embed", query.get("embed") === "1");
 
 if (
   !(summaryPanel instanceof HTMLElement) ||
@@ -602,6 +608,9 @@ function bindControls() {
   shareMap.addEventListener("click", shareCurrentMap);
   sharePromptButton.addEventListener("click", shareCurrentMap);
   closeSharePrompt.addEventListener("click", dismissSharePrompt);
+  collapseMapCta.addEventListener("click", () => {
+    mapCta.classList.add("is-collapsed");
+  });
 
   timeSlider.addEventListener("input", () => {
     finishIntro();
@@ -708,6 +717,25 @@ function applyMetadata() {
     aboutMapEl.textContent = `${name}${String(name).toLowerCase().endsWith("s") ? "'" : "'s"} running routes from a Garmin account export. Brighter streets were run more often.`;
   }
   dateRangeCopyEl.textContent = `This map covers ${formatMonth(new Date(state.meta.start))} to ${formatMonth(new Date(state.meta.end))}.`;
+  applyViewerCta();
+}
+
+function applyViewerCta() {
+  const label = typeof state.meta.ctaLabel === "string" ? state.meta.ctaLabel.trim() : "";
+  const href = typeof state.meta.ctaHref === "string" ? state.meta.ctaHref.trim() : "";
+  if (!label || !href) {
+    mapCta.hidden = true;
+    return;
+  }
+
+  mapCtaCopy.textContent =
+    typeof state.meta.ctaCopy === "string" && state.meta.ctaCopy.trim()
+      ? state.meta.ctaCopy.trim()
+      : "Want a running map like this?";
+  mapCtaLink.textContent = label;
+  mapCtaLink.href = href;
+  mapCta.classList.remove("is-collapsed");
+  mapCta.hidden = false;
 }
 
 function initializeGl() {

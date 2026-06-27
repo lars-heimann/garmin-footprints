@@ -7,6 +7,9 @@ const outputDir = join(root, "dist", "runs-pages");
 const viewerDir = join(root, "apps", "web", "viewer");
 const dataDir = join(root, "sites", "runs");
 const requiredFiles = ["index.html", "app.js", "styles.css", "meta.json", "points.bin", ".nojekyll"];
+const runsPageTitle = "Lars' Running Footprints";
+const runsPageDescription =
+  "Explore Lars Heimann's running routes as an interactive map, then try Lars' Garmin RunMaps yourself.";
 
 async function copyArtifact() {
   await rm(outputDir, { recursive: true, force: true });
@@ -18,7 +21,38 @@ async function copyArtifact() {
   for (const file of ["meta.json", "points.bin"]) {
     await copyFile(join(dataDir, file), join(outputDir, file));
   }
+  await writeRunsPageMetadata();
   await writeFile(join(outputDir, ".nojekyll"), "");
+}
+
+async function writeRunsPageMetadata() {
+  const indexPath = join(outputDir, "index.html");
+  const html = await readFile(indexPath, "utf8");
+  await writeFile(
+    indexPath,
+    html
+      .replace(/<title>.*?<\/title>/, `<title>${runsPageTitle}</title>`)
+      .replace(
+        /<meta\s+name="description"\s+content="[^"]*"\s*\/>|<meta\s+name="description"[\s\S]*?\/>/,
+        `<meta name="description" content="${runsPageDescription}" />`
+      )
+      .replace(
+        /<meta\s+property="og:title"\s+content="[^"]*"\s*\/>/,
+        `<meta property="og:title" content="${runsPageTitle}" />`
+      )
+      .replace(
+        /<meta\s+property="og:description"\s+content="[^"]*"\s*\/>|<meta\s+property="og:description"[\s\S]*?\/>/,
+        `<meta property="og:description" content="${runsPageDescription}" />`
+      )
+      .replace(
+        /<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/>/,
+        `<meta name="twitter:title" content="${runsPageTitle}" />`
+      )
+      .replace(
+        /<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/>|<meta\s+name="twitter:description"[\s\S]*?\/>/,
+        `<meta name="twitter:description" content="${runsPageDescription}" />`
+      )
+  );
 }
 
 async function assertFile(path) {
@@ -57,6 +91,12 @@ async function validateArtifact() {
   if (meta.viewerHeadline !== "Every run, one GPS point at a time") {
     throw new Error("meta.json must set the personal Pages headline");
   }
+  if (meta.ctaLabel !== "I want this too") {
+    throw new Error("meta.json must set the Lars RunMaps CTA label");
+  }
+  if (meta.ctaHref !== "https://runmaps.larsheimann.com/") {
+    throw new Error("meta.json must set the Lars RunMaps CTA URL");
+  }
   if (meta.localOnly !== false) {
     throw new Error("meta.json must mark the static Pages map as public");
   }
@@ -77,6 +117,14 @@ async function validateArtifact() {
   const expectedBytes = meta.pointCount * 12;
   if (points.size !== expectedBytes) {
     throw new Error(`points.bin is ${points.size} bytes; expected ${expectedBytes}`);
+  }
+
+  const html = await readFile(join(outputDir, "index.html"), "utf8");
+  if (!html.includes(`<title>${runsPageTitle}</title>`)) {
+    throw new Error("runs Pages artifact must set the Lars page title");
+  }
+  if (!html.includes(`content="${runsPageDescription}"`)) {
+    throw new Error("runs Pages artifact must set the Lars page description");
   }
 }
 

@@ -61,6 +61,7 @@ canvas:active {
 
 .summary,
 .controls,
+.map-cta,
 .share-prompt {
   border: 1px solid rgba(244, 241, 232, 0.14);
   border-radius: var(--corner-radius);
@@ -122,6 +123,20 @@ h1 {
   font-size: clamp(1.55rem, 2.2rem, 3.25rem);
   line-height: 1.04;
   letter-spacing: 0;
+}
+
+body.is-embed .summary {
+  width: min(21rem, calc(100vw - 2rem));
+  padding: 0.95rem;
+}
+
+body.is-embed h1 {
+  font-size: clamp(1.25rem, 5.4vw, 1.85rem);
+  line-height: 1.08;
+}
+
+body.is-embed dl {
+  margin-top: 0.95rem;
 }
 
 dl {
@@ -362,6 +377,80 @@ input[type="range"] {
   place-items: center;
   border-radius: 999px;
   padding: 0;
+  background: rgba(5, 7, 8, 0.82);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.map-cta {
+  position: relative;
+  pointer-events: auto;
+  width: min(20rem, 100%);
+  padding: 1rem 3rem 1rem 1rem;
+  transition:
+    padding 180ms ease,
+    width 180ms ease;
+}
+
+.map-cta .icon-button {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  width: 2rem;
+  min-height: 2rem;
+  border-radius: 999px;
+  padding: 0;
+  color: rgba(244, 241, 232, 0.72);
+}
+
+.map-cta p {
+  margin: 0;
+  color: rgba(244, 241, 232, 0.72);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.map-cta a {
+  display: inline-flex;
+  min-height: 2.45rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.85rem;
+  border: 1px solid rgba(240, 189, 95, 0.58);
+  border-radius: 10px;
+  background: rgba(240, 189, 95, 0.18);
+  color: #fff8e8;
+  padding: 0 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.map-cta a:hover,
+.map-cta a:focus-visible {
+  border-color: rgba(240, 189, 95, 0.82);
+  background: rgba(240, 189, 95, 0.26);
+  outline: none;
+}
+
+.map-cta.is-collapsed {
+  width: fit-content;
+  max-width: 100%;
+  justify-self: end;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.map-cta.is-collapsed p,
+.map-cta.is-collapsed .icon-button {
+  display: none;
+}
+
+.map-cta.is-collapsed a {
+  margin-top: 0;
   background: rgba(5, 7, 8, 0.82);
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(18px);
