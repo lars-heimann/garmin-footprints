@@ -20,15 +20,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v8
         with:
-          python-version: "3.12"
+          enable-cache: true
+          cache-python: true
 
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Install Python quality dependencies
-        run: python -m pip install -r processor/requirements-dev.txt
+      - name: Install Python dependencies
+        run: uv sync --locked
 
       - name: Quality checks
         run: npm run quality

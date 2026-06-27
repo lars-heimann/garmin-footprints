@@ -31,9 +31,10 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v8
         with:
-          python-version: "3.12"
+          enable-cache: true
+          cache-python: true
 
       - uses: opentofu/setup-opentofu@v2
         with:
@@ -42,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          python -m pip install -r processor/requirements-dev.txt
+          uv sync --locked
 
       - name: Quality and tests
         run: |

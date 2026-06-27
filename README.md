@@ -33,12 +33,14 @@ npm run quality
 
 Quality checks include Prettier, ESLint, TypeScript `checkJs`, Ruff, and mypy. `.pre-commit-config.yaml` provides an optional local pre-commit hook that runs the same quality gate.
 
+Python tooling is managed by uv. Run `uv sync` once to create the local `.venv`; npm scripts use `uv run --frozen` so Ruff, mypy, and processor tests use the locked Python 3.12 environment.
+
 ## Processor CLI
 
 The production sharing path does not run this CLI. It remains useful for local debugging and parity tests:
 
 ```sh
-python3 processor/build_visualization_data.py garmin-export.zip out/site \
+uv run python processor/build_visualization_data.py garmin-export.zip out/site \
   --slug runner \
   --display-name "Runner" \
   --template-dir apps/web/viewer

@@ -1,1 +1,0 @@
-# The MVP processor uses only the Python standard library.
