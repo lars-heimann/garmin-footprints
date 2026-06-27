@@ -17,7 +17,7 @@
 
 ## Privacy
 
-The Garmin ZIP contains private health and location data. Runmaps processes it in your browser so the raw ZIP does not leave your machine. The app extracts only running GPS tracks, trims the start and finish of each run, and publishes only generated map files if you choose to share. Generated map assets are public at the final slug URL for 30 days.
+The Garmin ZIP contains private health and location data. Runmaps processes it in your browser so the raw ZIP does not leave your machine. The app extracts only running GPS tracks, trims the start and finish of each run, and publishes only generated `meta.json` and `points.bin` map files if you choose to share. Generated map assets are public at the final slug URL for 30 days.
 
 ## Troubleshooting
 

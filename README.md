@@ -9,7 +9,13 @@ Invite-only Runmaps web app for turning a Garmin account export into a shareable
 - `apps/web/browser-processing` - browser Garmin export parser and map-data generator
 - `apps/web/viewer` - reusable public map viewer served for every published slug
 - `processor` - standalone Python processor kept for parser parity tests and local CLI usage
-- `docs` - deployment, Garmin export, and browser-first architecture notes
+- `docs` - deployment and Garmin export notes
+
+## Sharing Model
+
+Runmaps processes Garmin ZIP files locally in the browser. Users can create a private preview without an invite code, and the raw ZIP stays on the user's device.
+
+Publishing starts only after a successful preview. The browser uploads the generated `meta.json` and `points.bin` files, not the Garmin ZIP. The Worker reserves a server-authoritative slug, serves the public map at `/m/{slug}`, returns a private delete link, and expires published maps after 30 days.
 
 ## Test
 
@@ -62,4 +68,4 @@ The preview workflow does not write a `CNAME` file and does not claim `runs.lars
 
 ## Production
 
-Production launch is driven by OpenTofu plus GitHub Actions. See [docs/deployment.md](docs/deployment.md), [docs/browser-first-sharing.md](docs/browser-first-sharing.md), and [infra/README.md](infra/README.md).
+Production launch is driven by OpenTofu plus GitHub Actions. See [docs/deployment.md](docs/deployment.md) and [infra/README.md](infra/README.md).

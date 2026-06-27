@@ -9,6 +9,10 @@ Generated maps use paths instead of wildcard subdomains so the deployment stays 
 coverage. A deeper hostname such as `{slug}.runmaps.larsheimann.com` would require paid Advanced Certificate Manager,
 Total TLS, or a custom certificate.
 
+## Current Sharing Model
+
+Production uses browser-first Garmin ZIP processing. The Worker does not accept raw Garmin ZIP uploads or processor callbacks. It creates publish sessions, reserves server-authoritative slugs, accepts only generated `meta.json` and `points.bin` assets, and serves public maps at `/m/{slug}`.
+
 ## Automated Path
 
 1. Use `infra/bootstrap` once to create the private R2 OpenTofu state bucket.

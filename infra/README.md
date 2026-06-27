@@ -12,6 +12,8 @@ certificate feature or a custom certificate.
 - `bootstrap` creates the private R2 bucket used for OpenTofu state.
 - `prod` creates the app R2 bucket, D1 database, DNS records, Worker routes, generated app secrets, and GitHub Actions configuration.
 
+The infrastructure supports browser-first publish sessions for derived map assets; it does not provision backend Garmin ZIP processing.
+
 The first unavoidable manual step is providing credentials to OpenTofu/GitHub Actions:
 
 - `CLOUDFLARE_API_TOKEN` with scoped access to the account and `larsheimann.com` zone.
