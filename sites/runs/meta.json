@@ -126,5 +126,8 @@
   "localOnly": false,
   "siteUrl": null,
   "viewerEyebrow": "Lars' Running Footprints",
-  "viewerHeadline": "Every run, one GPS point at a time"
+  "viewerHeadline": "Every run, one GPS point at a time",
+  "ctaLabel": "I want this too",
+  "ctaHref": "https://runmaps.larsheimann.com/",
+  "ctaCopy": "Create your own private preview from a Garmin export, then publish it only if you like it."
 }
