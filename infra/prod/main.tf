@@ -45,6 +45,8 @@ resource "cloudflare_workers_route" "root" {
 }
 
 resource "cloudflare_ruleset" "publish_rate_limits" {
+  count = var.enable_publish_rate_limits ? 1 : 0
+
   zone_id     = var.cloudflare_zone_id
   name        = "Runmaps publish API rate limits"
   description = "Blocks obvious abuse of public publishing routes before requests reach the Worker."

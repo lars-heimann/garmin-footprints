@@ -61,6 +61,12 @@ variable "create_worker_routes" {
   default     = true
 }
 
+variable "enable_publish_rate_limits" {
+  description = "Whether to manage Cloudflare WAF rate limits for public publishing routes. Requires Rulesets/WAF edit permission on the Cloudflare API token."
+  type        = bool
+  default     = false
+}
+
 variable "app_secret_rotation_id" {
   description = "Bump to rotate generated app secrets after exposure or on scheduled rotation."
   type        = string

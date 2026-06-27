@@ -70,8 +70,6 @@ jobs:
           EOF
 
       - name: OpenTofu apply base resources
-        env:
-          TF_VAR_create_worker_routes: "false"
         run: |
           tofu -chdir=infra/prod init -backend-config=backend.hcl
           tofu -chdir=infra/prod apply -auto-approve
