@@ -44,58 +44,6 @@ resource "cloudflare_workers_route" "root" {
   script  = cloudflare_worker.app.name
 }
 
-resource "cloudflare_ruleset" "publish_rate_limits" {
-  count = var.enable_publish_rate_limits ? 1 : 0
-
-  zone_id     = var.cloudflare_zone_id
-  name        = "Runmaps publish API rate limits"
-  description = "Blocks obvious abuse of public publishing routes before requests reach the Worker."
-  kind        = "zone"
-  phase       = "http_ratelimit"
-
-  rules = [
-    {
-      ref         = "runmaps_publish_sessions_by_ip"
-      description = "Limit publish session creation by IP"
-      expression  = "http.host eq \"${var.domain}\" and http.request.method eq \"POST\" and http.request.uri.path eq \"/api/publish-sessions\""
-      action      = "block"
-
-      ratelimit = {
-        characteristics     = ["cf.colo.id", "ip.src"]
-        period              = 600
-        requests_per_period = 5
-        mitigation_timeout  = 600
-      }
-    },
-    {
-      ref         = "runmaps_publish_assets_by_ip"
-      description = "Limit generated asset uploads by IP"
-      expression  = "http.host eq \"${var.domain}\" and http.request.method eq \"PUT\" and http.request.uri.path matches \"^/api/publish-sessions/[^/]+/assets/(meta\\\\.json|points\\\\.bin)$\""
-      action      = "block"
-
-      ratelimit = {
-        characteristics     = ["cf.colo.id", "ip.src"]
-        period              = 600
-        requests_per_period = 30
-        mitigation_timeout  = 600
-      }
-    },
-    {
-      ref         = "runmaps_publish_complete_by_ip"
-      description = "Limit publish completion attempts by IP"
-      expression  = "http.host eq \"${var.domain}\" and http.request.method eq \"POST\" and http.request.uri.path matches \"^/api/publish-sessions/[^/]+/complete$\""
-      action      = "block"
-
-      ratelimit = {
-        characteristics     = ["cf.colo.id", "ip.src"]
-        period              = 600
-        requests_per_period = 20
-        mitigation_timeout  = 600
-      }
-    },
-  ]
-}
-
 resource "random_password" "invite_hash_secret" {
   length  = 48
   special = false
