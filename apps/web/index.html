@@ -3,20 +3,50 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Runmaps</title>
+    <title>Lars' Garmin RunMaps</title>
+    <meta
+      name="description"
+      content="Create a private browser-only preview from a Garmin account export, then publish a temporary running map only if you like it."
+    />
+    <meta property="og:title" content="Lars' Garmin RunMaps" />
+    <meta
+      property="og:description"
+      content="Turn a Garmin account export into a shareable running footprint. Your Garmin ZIP stays in your browser."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://runmaps.larsheimann.com/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Lars' Garmin RunMaps" />
+    <meta
+      name="twitter:description"
+      content="Create a private preview first. Publish only generated map files if you want to share it."
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="shell">
       <section class="workspace">
         <div class="intro">
-          <p class="eyebrow">Invite-only Garmin map builder</p>
+          <p class="eyebrow">Lars' Garmin RunMaps</p>
           <h1>Create a private preview first. Publish only if you like it.</h1>
           <p class="privacy">
             Your Garmin ZIP never leaves your browser. You do not need an invite code to preview your map. If you choose
             to share it, publishing uploads only generated map files and the public map expires after 30 days.
           </p>
         </div>
+
+        <section class="personal-runs-preview" aria-label="Live example">
+          <div class="preview-copy-block">
+            <p class="eyebrow">Live example</p>
+          </div>
+          <div class="runs-preview-frame">
+            <iframe
+              id="personalRunsFrame"
+              src="./viewer/index.html?embed=1"
+              title="Lars Heimann personal running map preview"
+            ></iframe>
+          </div>
+        </section>
 
         <form id="uploadForm" class="upload-panel" novalidate>
           <section id="errorSummary" class="error-summary" tabindex="-1" hidden></section>
@@ -138,6 +168,130 @@
         <a id="shareLink" hidden target="_blank" rel="noopener noreferrer"></a>
         <a id="deleteLink" hidden target="_blank" rel="noopener noreferrer"></a>
       </aside>
+
+      <section class="content-section faq-section" aria-labelledby="faqTitle">
+        <p class="eyebrow">FAQ</p>
+        <h2 id="faqTitle">What to know before trying it</h2>
+        <div class="faq-grid">
+          <details>
+            <summary>What file do I need?</summary>
+            <p>
+              Use the
+              <a
+                href="https://www.garmin.com/account/datamanagement/exportdata/"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><strong>full Garmin account export ZIP</strong></a
+              >
+              from Garmin's data export page. Do not upload a single activity file, a Strava export, or a folder you
+              zipped yourself.
+            </p>
+          </details>
+          <details>
+            <summary>Does my Garmin ZIP get uploaded?</summary>
+            <p>
+              <strong>No.</strong> The ZIP is processed locally in your browser for previewing. If you publish, the
+              server receives only generated map files, not your raw Garmin archive or FIT files.
+            </p>
+          </details>
+          <details>
+            <summary>Can I preview without an invite code?</summary>
+            <p><strong>Yes.</strong> You only need an invite code to publish.</p>
+          </details>
+          <details>
+            <summary>What is public after publishing?</summary>
+            <p>
+              The shared link shows your <strong>generated running footprint</strong>, display name, map statistics, and
+              route-density points. Starts and finishes are trimmed before publishing.
+            </p>
+          </details>
+          <details>
+            <summary>How long does a public map stay online?</summary>
+            <p>
+              Published maps expire after <strong>30 days</strong>. You also receive a private delete link after
+              publishing so you can remove the map earlier.
+            </p>
+          </details>
+          <details>
+            <summary>Can I delete my map after publishing?</summary>
+            <p><strong>Yes.</strong> You get a private delete link after publishing.</p>
+          </details>
+          <details>
+            <summary>Does it show my home address?</summary>
+            <p>
+              <strong>Starts and finishes are trimmed</strong>, but you should still review the preview before
+              publishing.
+            </p>
+          </details>
+          <details>
+            <summary>Which activities are included?</summary>
+            <p><strong>Outdoor running activities with GPS tracks</strong> from the Garmin export.</p>
+          </details>
+          <details>
+            <summary>Can I use Strava, GPX, TCX, or FIT files?</summary>
+            <p><strong>No.</strong> For now it expects the full Garmin account export ZIP.</p>
+          </details>
+          <details>
+            <summary>Why do I need an invite code?</summary>
+            <p>
+              Publishing is <strong>invite-only for now</strong> so I can keep the beta small, watch for rough edges,
+              and avoid opening the service wider than the current infrastructure is meant to handle.
+            </p>
+          </details>
+          <details>
+            <summary>How much does it cost?</summary>
+            <p><strong>Nothing.</strong> It's free and run within the free limits of Cloudflare.</p>
+          </details>
+          <details>
+            <summary>Is it open source?</summary>
+            <p>
+              <strong>Yes.</strong> You can have a look here:
+              <a href="https://github.com/lars-heimann/garmin-footprints" target="_blank" rel="noopener noreferrer"
+                >github.com/lars-heimann/garmin-footprints</a
+              >.
+            </p>
+          </details>
+          <details>
+            <summary>How long does processing take?</summary>
+            <p>
+              <strong>Usually only a few seconds.</strong> It depends on the size of your Garmin export and your device,
+              and the preview stays local while that happens.
+            </p>
+          </details>
+          <details>
+            <summary>Is this affiliated with Garmin?</summary>
+            <p>
+              <strong>No.</strong> This is an independent personal project by Lars Heimann and is not affiliated with,
+              endorsed by, or sponsored by Garmin.
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        <div>
+          <p class="footer-title">
+            Made by Lars Heimann -
+            <a href="https://runs.larsheimann.com/" target="_blank" rel="noopener noreferrer">See my runs here</a>
+          </p>
+          <p>
+            A small running-data experiment inspired by
+            <a href="https://ontracktrain.com/lab/five-million-gps-points" target="_blank" rel="noopener noreferrer"
+              >Five Million GPS Points</a
+            >.
+          </p>
+        </div>
+        <nav aria-label="Project links">
+          <a href="https://larsheimann.com/" target="_blank" rel="noopener noreferrer">Personal website</a>
+          <a href="https://github.com/lars-heimann/garmin-footprints" target="_blank" rel="noopener noreferrer"
+            >GitHub</a
+          >
+          <a href="https://www.linkedin.com/in/larsheimann/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+        </nav>
+        <p class="fine-print">
+          Lars' Garmin RunMaps is independent and is not affiliated with, endorsed by, or sponsored by Garmin.
+        </p>
+      </footer>
     </main>
 
     <dialog id="guideDialog" class="guide-dialog">

@@ -40,6 +40,7 @@ const guideDialog = mustElement("guideDialog", HTMLDialogElement);
 const guideButton = mustElement("guideButton", HTMLButtonElement);
 const closeGuideButton = mustElement("closeGuideButton", HTMLButtonElement);
 const publishPublicMapCheck = mustElement("understandsPublicMap", HTMLInputElement);
+const personalRunsFrame = mustElement("personalRunsFrame", HTMLIFrameElement);
 const readinessChecks = Array.from(document.querySelectorAll("#previewChecklist input[type='checkbox']")).map(
   (element) => {
     if (!(element instanceof HTMLInputElement)) throw new Error("Checklist input was not an input element.");
@@ -72,6 +73,7 @@ let turnstileSiteKey = null;
 let localWorker = null;
 let cancelLocalProcess = null;
 let localPreviewData = null;
+let personalRunsDataPromise = null;
 let maxMetaBytes = 1024 * 1024;
 let maxPointsBytes = 32 * 1024 * 1024;
 
@@ -139,6 +141,46 @@ async function apiFetch(path, options = {}) {
     throw error;
   }
   return payload;
+}
+
+async function loadPersonalRunsData() {
+  if (!personalRunsDataPromise) {
+    personalRunsDataPromise = Promise.all([
+      fetch("./assets/personal-runs/meta.json"),
+      fetch("./assets/personal-runs/points.bin"),
+    ]).then(async ([metaResponse, pointsResponse]) => {
+      if (!metaResponse.ok || !pointsResponse.ok) {
+        throw new Error("Personal runs preview data could not be loaded.");
+      }
+      const meta = await metaResponse.json();
+      const points = new Float32Array(await pointsResponse.arrayBuffer());
+      const previewMeta = { ...meta };
+      delete previewMeta.ctaCopy;
+      delete previewMeta.ctaHref;
+      delete previewMeta.ctaLabel;
+      return {
+        meta: {
+          ...previewMeta,
+          localOnly: true,
+          siteUrl: "https://runs.larsheimann.com/",
+        },
+        points,
+      };
+    });
+  }
+  return personalRunsDataPromise;
+}
+
+function postPreviewData(frame, previewData) {
+  const pointsBuffer = previewData.points.buffer.slice(
+    previewData.points.byteOffset,
+    previewData.points.byteOffset + previewData.points.byteLength
+  );
+  frame.contentWindow.postMessage(
+    { type: "runmaps-local-data", meta: previewData.meta, points: pointsBuffer },
+    window.location.origin,
+    [pointsBuffer]
+  );
 }
 
 function formatBytes(bytes) {
@@ -482,18 +524,16 @@ clearPreviewButton.addEventListener("click", () => {
 guideButton.addEventListener("click", () => guideDialog.showModal());
 closeGuideButton.addEventListener("click", () => guideDialog.close());
 
-window.addEventListener("message", (event) => {
-  if (event.source !== localPreviewFrame.contentWindow || event.data?.type !== "runmaps-viewer-ready") return;
-  if (!localPreviewData) return;
-  const pointsBuffer = localPreviewData.points.buffer.slice(
-    localPreviewData.points.byteOffset,
-    localPreviewData.points.byteOffset + localPreviewData.points.byteLength
-  );
-  localPreviewFrame.contentWindow.postMessage(
-    { type: "runmaps-local-data", meta: localPreviewData.meta, points: pointsBuffer },
-    window.location.origin,
-    [pointsBuffer]
-  );
+window.addEventListener("message", async (event) => {
+  if (event.data?.type !== "runmaps-viewer-ready") return;
+  if (event.source === localPreviewFrame.contentWindow) {
+    if (!localPreviewData) return;
+    postPreviewData(localPreviewFrame, localPreviewData);
+    return;
+  }
+  if (event.source === personalRunsFrame.contentWindow) {
+    postPreviewData(personalRunsFrame, await loadPersonalRunsData());
+  }
 });
 
 async function initTurnstile() {
