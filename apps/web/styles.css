@@ -669,6 +669,13 @@ button:disabled {
   margin: 0.4rem 0 1rem;
 }
 
+.invite-link-hint {
+  margin: -0.35rem 0 0;
+  color: #125f58;
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+
 .error-summary {
   border: 1px solid #dc2626;
   border-radius: 8px;
