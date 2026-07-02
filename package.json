@@ -21,7 +21,7 @@
     "test:e2e": "node tests/e2e/local-flow.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.18.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.7",
     "eslint": "^10.6.0",
     "globals": "^15.14.0",
