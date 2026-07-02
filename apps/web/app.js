@@ -1,3 +1,5 @@
+import { initInvitePrefill } from "./invite-link.js";
+
 /**
  * @template {HTMLElement} T
  * @param {string} id
@@ -41,6 +43,7 @@ const guideButton = mustElement("guideButton", HTMLButtonElement);
 const closeGuideButton = mustElement("closeGuideButton", HTMLButtonElement);
 const publishPublicMapCheck = mustElement("understandsPublicMap", HTMLInputElement);
 const personalRunsFrame = mustElement("personalRunsFrame", HTMLIFrameElement);
+const inviteLinkHint = mustElement("inviteLinkHint", HTMLParagraphElement);
 const readinessChecks = Array.from(document.querySelectorAll("#previewChecklist input[type='checkbox']")).map(
   (element) => {
     if (!(element instanceof HTMLInputElement)) throw new Error("Checklist input was not an input element.");
@@ -589,4 +592,5 @@ function resetTurnstile() {
 }
 
 updatePreviewCopy();
+initInvitePrefill(browserWindow, form.inviteCode, inviteLinkHint);
 initTurnstile();

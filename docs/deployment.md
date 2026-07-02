@@ -63,6 +63,14 @@ Use a unique `SECRET_NAME` if you need several active invite codes at once. Reus
 
 Do not pass plaintext invite codes as workflow-dispatch inputs, commit them, paste them into GitHub logs, or expect to recover them later from D1. GitHub can list secret names, but it cannot reveal secret values.
 
+To send a one-link beta invite, put the plaintext invite code in the URL fragment:
+
+```text
+https://runmaps.larsheimann.com/#invite=RUNMAPS-FRIENDS-ABCDE
+```
+
+URL-encode the code if it contains spaces or special characters. Runmaps reads the fragment in the browser, fills the publish invite field, and removes the fragment from the address bar. Opening the link does not publish anything or consume an invite use.
+
 ## Cleanup
 
 The Worker stores only derived public map files under `sites/{slug}/meta.json` and `sites/{slug}/points.bin`. It does not store raw Garmin ZIPs.

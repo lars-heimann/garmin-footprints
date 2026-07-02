@@ -56,6 +56,8 @@ npm run dev:local
 
 Open `http://127.0.0.1:8787/` and use invite code `LOCAL-DEMO` only when publishing. Local preview does not need an invite code. Local share URLs use `http://127.0.0.1:8787/m/{slug}`.
 
+Invite-link prefill can be tested locally at `http://127.0.0.1:8787/#invite=LOCAL-DEMO`. The app fills the publish invite field after opening, then removes the fragment from the address bar.
+
 The Worker reserves server-authoritative slugs, accepts only generated `meta.json` and `points.bin`, serves public map paths from R2, supports confirmation-based delete links, and expires maps after 30 days.
 
 ## Personal Runs Pages Preview
