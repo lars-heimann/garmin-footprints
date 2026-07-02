@@ -9,7 +9,7 @@
     "format": "prettier --write . && uv run --frozen --group dev ruff format processor scripts",
     "format:check": "prettier --check . && uv run --frozen --group dev ruff format --check processor scripts",
     "lint": "eslint . && uv run --frozen --group dev ruff check processor scripts",
-    "typecheck": "tsc --noEmit && uv run --frozen --group dev mypy processor scripts",
+    "typecheck": "tsgo --noEmit && uv run --frozen --group dev mypy processor scripts",
     "build:runs-pages": "node scripts/build-runs-pages.mjs",
     "test:runs-pages": "node scripts/build-runs-pages.mjs",
     "deploy:worker": "wrangler deploy --config apps/worker/wrangler.jsonc",
@@ -23,10 +23,10 @@
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@types/node": "^22.10.7",
+    "@typescript/native-preview": "7.0.0-dev.20260702.3",
     "eslint": "^9.18.0",
     "globals": "^15.14.0",
     "prettier": "^3.4.2",
-    "typescript": "^6.0.3",
     "wrangler": "^4.26.0"
   },
   "dependencies": {
