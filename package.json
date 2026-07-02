@@ -21,13 +21,13 @@
     "test:e2e": "node tests/e2e/local-flow.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.18.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.7",
-    "eslint": "^9.18.0",
+    "eslint": "^10.6.0",
     "globals": "^15.14.0",
-    "prettier": "^3.4.2",
+    "prettier": "^3.9.4",
     "typescript": "7.0.1-rc",
-    "wrangler": "^4.26.0"
+    "wrangler": "^4.107.0"
   },
   "dependencies": {
     "@zip.js/zip.js": "^2.8.26"
