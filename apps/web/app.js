@@ -361,7 +361,7 @@ function processLocally(file) {
         finish();
         renderLocalPreview(meta, points);
         setStatus("Preview is ready.", 100);
-        resolve();
+        resolve(undefined);
         return;
       }
       if (type === "error") {
