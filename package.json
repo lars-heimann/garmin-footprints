@@ -27,7 +27,7 @@
     "globals": "^15.14.0",
     "prettier": "^3.9.4",
     "typescript": "7.0.1-rc",
-    "wrangler": "^4.107.0"
+    "wrangler": "^4.118.0"
   },
   "dependencies": {
     "@zip.js/zip.js": "^2.8.26"
