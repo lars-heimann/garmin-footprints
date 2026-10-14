@@ -22,14 +22,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^22.10.7",
-    "eslint": "^10.6.0",
-    "globals": "^15.14.0",
-    "prettier": "^3.9.4",
-    "typescript": "7.0.1-rc",
-    "wrangler": "^4.107.0"
+    "@types/node": "^22.20.1",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.5",
+    "typescript": "7.0.2",
+    "wrangler": "^4.151.0"
   },
   "dependencies": {
-    "@zip.js/zip.js": "^2.8.26"
+    "@zip.js/zip.js": "^2.8.31"
   }
 }

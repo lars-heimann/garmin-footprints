@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   plan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       TF_IN_AUTOMATION: "true"
@@ -33,12 +34,38 @@ jobs:
       - name: Format check
         run: tofu fmt -check -recursive infra
 
-      - name: Init without backend
-        run: tofu -chdir=infra/prod init -backend=false
+      - name: Verify GitHub admin token
+        env:
+          GH_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/secrets" --silent
+          gh api "repos/$GITHUB_REPOSITORY/actions/variables" --silent
+
+      - name: Write OpenTofu backend config
+        env:
+          STATE_BUCKET: ${{ vars.TOFU_STATE_BUCKET }}
+          STATE_ACCESS_KEY_ID: ${{ secrets.TOFU_STATE_ACCESS_KEY_ID }}
+          STATE_SECRET_ACCESS_KEY: ${{ secrets.TOFU_STATE_SECRET_ACCESS_KEY }}
+        run: |
+          cat > infra/prod/backend.hcl <<EOF
+          bucket                      = "$STATE_BUCKET"
+          key                         = "prod/opentofu.tfstate"
+          region                      = "auto"
+          endpoint                    = "https://${TF_VAR_cloudflare_account_id}.r2.cloudflarestorage.com"
+          access_key                  = "$STATE_ACCESS_KEY_ID"
+          secret_key                  = "$STATE_SECRET_ACCESS_KEY"
+          skip_credentials_validation = true
+          skip_metadata_api_check     = true
+          skip_region_validation      = true
+          skip_requesting_account_id  = true
+          use_path_style              = true
+          EOF
+
+      - name: Initialize remote state
+        run: tofu -chdir=infra/prod init -backend-config=backend.hcl -lockfile=readonly
 
       - name: Validate
         run: tofu -chdir=infra/prod validate
 
       - name: Plan
-        if: env.CLOUDFLARE_API_TOKEN != '' && env.GITHUB_TOKEN != ''
-        run: tofu -chdir=infra/prod plan -no-color
+        run: tofu -chdir=infra/prod plan -no-color -input=false -lock-timeout=60s
