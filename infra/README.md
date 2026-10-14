@@ -84,3 +84,15 @@ gh run watch "$RUN_ID" --exit-status
 ```
 
 The workflow masks the plaintext code, hashes it with `INVITE_HASH_SECRET`, and inserts only the hash plus a readable label into D1. Do not pass plaintext invite codes as workflow-dispatch inputs or expect to recover them later from GitHub or D1.
+
+## Checking the GitHub admin token
+
+After replacing the repository Actions secret `GH_ADMIN_TOKEN`, run the **OpenTofu Plan** workflow on the branch to check. It first calls the GitHub Actions secrets and variables APIs with that secret, without printing their responses. It then initializes the R2 state backend with the same settings as deployment, validates the configuration, and plans against the existing state. It does not apply infrastructure changes. Fork pull requests are skipped because they cannot access these credentials.
+
+The backend must be initialized normally before a plan; `init -backend=false` only supports configuration validation and leaves a subsequent remote plan unable to run. A successful token check confirms authentication and read access. A successful production deployment additionally exercises the write access required to manage Actions secrets and variables.
+
+```sh
+gh workflow run infra-plan.yml --ref main
+gh run list --workflow infra-plan.yml --limit 1
+gh run watch <run-id> --exit-status
+```

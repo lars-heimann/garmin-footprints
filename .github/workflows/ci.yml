@@ -15,12 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
 
-      - uses: "astral-sh/setup-uv@v8.2.0"
+      - uses: "astral-sh/setup-uv@v10.2.0"
         with:
           enable-cache: true
           cache-python: true
@@ -34,11 +34,5 @@ jobs:
       - name: Quality checks
         run: npm run quality
 
-      - name: Worker tests
-        run: npm run test:worker
-
-      - name: Processor tests
-        run: npm run test:processor
-
-      - name: End-to-end tests
-        run: npm run test:e2e
+      - name: Full test suite
+        run: npm test
