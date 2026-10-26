@@ -30,6 +30,6 @@
     "wrangler": "^4.151.0"
   },
   "dependencies": {
-    "@zip.js/zip.js": "^2.8.31"
+    "@zip.js/zip.js": "^2.24.0"
   }
 }
